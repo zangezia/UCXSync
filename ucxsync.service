@@ -1,0 +1,25 @@
+[Unit]
+Description=UCXSync - File synchronization service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/ucxsync
+ExecStart=/opt/ucxsync/ucxsync --config /etc/ucxsync/config.yaml
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ucxsync
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

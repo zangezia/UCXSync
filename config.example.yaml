@@ -1,0 +1,64 @@
+# UCXSync Configuration for Linux
+
+# Network nodes to sync from
+nodes:
+  - WU01
+  - WU02
+  - WU03
+  - WU04
+  - WU05
+  - WU06
+  - WU07
+  - WU08
+  - WU09
+  - WU10
+  - WU11
+  - WU12
+  - WU13
+  - CU
+
+# Network shares on each node
+shares:
+  - E$
+  - F$
+
+# CIFS/SMB credentials
+credentials:
+  username: Administrator
+  password: ultracam
+
+# Network mounting
+network:
+  base_mount_dir: /mnt/ucx
+  auto_mount: true
+  mount_timeout: 30s
+
+# Synchronization settings
+sync:
+  max_parallelism: 8
+  service_loop_interval: 10s
+  min_free_disk_space: 52428800      # 50 MB
+  disk_space_safety_margin: 104857600 # 100 MB
+  buffer_size: 32768                  # 32 KB copy buffer
+
+# Web server
+web:
+  host: 0.0.0.0  # Listen on all interfaces
+  port: 8080
+
+# Monitoring
+monitoring:
+  performance_update_interval: 1s
+  ui_update_interval: 2s
+  cpu_smoothing_samples: 3
+  max_disk_throughput_mbps: 200.0
+  network_speed_bps: 1000000000  # 1 Gbps
+
+# Logging
+logging:
+  level: info
+  file: /var/log/ucxsync/ucxsync.log
+  max_size: 100     # MB
+  max_backups: 5
+  max_age: 30       # days
+  compress: true

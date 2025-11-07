@@ -1,0 +1,49 @@
+# Binaries
+ucxsync
+ucxsync.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Configuration (may contain credentials)
+config.yaml
+config.yml
+local.yaml
+local.yml
+
+# Build output
+bin/
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/

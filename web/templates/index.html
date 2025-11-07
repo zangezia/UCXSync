@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UCXSync - Синхронизация файлов</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔄 UCXSync</h1>
+            <p class="subtitle">Синхронизация файлов UCX проектов</p>
+        </header>
+
+        <main>
+            <!-- Control Panel -->
+            <section class="control-panel">
+                <div class="form-group">
+                    <label for="project">Проект:</label>
+                    <div class="input-group">
+                        <select id="project" class="form-control">
+                            <option value="">-- Выберите проект --</option>
+                        </select>
+                        <button id="refresh-projects" class="btn btn-secondary">🔄 Обновить</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="destination">Папка назначения:</label>
+                    <input type="text" id="destination" class="form-control" placeholder="/path/to/destination">
+                </div>
+
+                <div class="form-group">
+                    <label for="parallelism">Параллельных потоков:</label>
+                    <input type="number" id="parallelism" class="form-control" value="8" min="1" max="32">
+                </div>
+
+                <div class="button-group">
+                    <button id="start-btn" class="btn btn-primary">▶️ Запустить</button>
+                    <button id="stop-btn" class="btn btn-danger" disabled>⏹️ Остановить</button>
+                </div>
+            </section>
+
+            <!-- Status Panel -->
+            <section class="status-panel">
+                <div class="status-grid">
+                    <div class="status-card">
+                        <div class="status-label">Снимков скачано</div>
+                        <div class="status-value" id="completed-captures">0</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-label">Последний снимок</div>
+                        <div class="status-value" id="last-capture">-</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-label">Тестовых снимков</div>
+                        <div class="status-value" id="test-captures">0</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-label">Статус</div>
+                        <div class="status-value" id="sync-status">Остановлено</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Performance Metrics -->
+            <section class="metrics-panel">
+                <h2>Производительность</h2>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">CPU</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="cpu-progress"></div>
+                        </div>
+                        <div class="metric-value" id="cpu-value">0%</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Память</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="memory-progress"></div>
+                        </div>
+                        <div class="metric-value" id="memory-value">0 GB / 0 GB</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Диск</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="disk-progress"></div>
+                        </div>
+                        <div class="metric-value" id="disk-value">0 MB/s</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Сеть</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="network-progress"></div>
+                        </div>
+                        <div class="metric-value" id="network-value">0 MB/s</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Свободно на диске</div>
+                        <div class="metric-value large" id="free-disk">0 GB</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Activity Table -->
+            <section class="activity-panel">
+                <h2>Активность по узлам</h2>
+                <div class="table-container">
+                    <table id="activity-table">
+                        <thead>
+                            <tr>
+                                <th>Узел</th>
+                                <th>Шара</th>
+                                <th>Статус</th>
+                                <th>Файлов скачано</th>
+                                <th>Прогресс</th>
+                                <th>Обновлено</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activity-body">
+                            <tr>
+                                <td colspan="6" class="no-data">Нет активных задач</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Log Panel -->
+            <section class="log-panel">
+                <h2>Журнал событий</h2>
+                <div id="log-container" class="log-container"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>UCXSync v1.0.0 | <span id="connection-status">🔴 Отключено</span></p>
+        </footer>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

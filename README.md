@@ -1,0 +1,388 @@
+# UCXSync
+
+High-performance file synchronization tool for UCX projects with web-based monitoring (Linux-only).
+
+## Overview
+
+UCXSync is a Linux Go application that synchronizes files from multiple network nodes to a local destination with real-time performance monitoring through a web interface.
+
+### Key Features
+
+- **Multi-node synchronization**: Parallel copying from 14 worker nodes (WU01-WU13, CU)
+- **Multiple sources**: Each node has 2 network shares (E$, F$) = 28 sources total
+- **Incremental sync**: Only copies new or modified files
+- **Configurable parallelism**: Adjustable concurrent file operations
+- **Capture tracking**: Automatic detection and tracking of completed captures
+- **Web interface**: Real-time monitoring via browser
+- **Performance metrics**: Live CPU, disk, network, and memory monitoring
+- **CIFS/SMB mounting**: Automatic mounting of network shares
+
+## Architecture
+
+```
+UCXSync/
+├── cmd/
+│   └── ucxsync/           # Main application entry point
+├── internal/
+│   ├── config/            # Configuration management
+│   ├── sync/              # File synchronization engine
+│   ├── monitor/           # Performance monitoring
+│   ├── network/           # Network credentials & SMB mounting
+│   ├── storage/           # Settings persistence
+│   └── web/               # Web server & WebSocket handlers
+├── pkg/
+│   └── models/            # Shared data models
+├── web/
+│   ├── static/            # CSS, JS, images
+│   └── templates/         # HTML templates
+├── go.mod
+├── go.sum
+├── Makefile
+└── README.md
+```
+
+## System Requirements
+
+- **OS**: Ubuntu 20.04+ or compatible Linux distribution
+- **Go**: 1.21 or higher (for building from source)
+- **CIFS**: `cifs-utils` package for SMB mounting
+- **Permissions**: sudo/root for mounting network shares
+- **Disk**: Minimum 50 MB free disk space
+- **Network**: Access to UCX worker nodes (WU01-WU13, CU)
+
+## Installation
+
+### From Source
+
+```bash
+# Clone the repository
+git clone https://github.com/zangezia/UCXSync.git
+cd UCXSync
+
+# Build
+go build -o ucxsync ./cmd/ucxsync
+
+# Run
+./ucxsync
+```
+
+### Using Go Install
+
+```bash
+go install github.com/zangezia/UCXSync/cmd/ucxsync@latest
+```
+
+## Configuration
+
+Create `config.yaml` in the application directory:
+
+```yaml
+# Network configuration
+nodes:
+  - WU01
+  - WU02
+  - WU03
+  - WU04
+  - WU05
+  - WU06
+  - WU07
+  - WU08
+  - WU09
+  - WU10
+  - WU11
+  - WU12
+  - WU13
+  - CU
+
+shares:
+  - E$
+  - F$
+
+# Authentication (Windows)
+credentials:
+  username: Administrator
+  password: ultracam
+
+# Synchronization settings
+sync:
+  max_parallelism: 8
+  service_loop_interval: 10s
+  min_free_disk_space: 52428800  # 50 MB
+  disk_space_safety_margin: 104857600  # 100 MB
+
+# Web server
+web:
+  host: localhost
+  port: 8080
+
+# Monitoring
+monitoring:
+  performance_update_interval: 1s
+  ui_update_interval: 2s
+  cpu_smoothing_samples: 3
+  max_disk_throughput_mbps: 200.0
+  network_speed_bps: 1000000000  # 1 Gbps
+
+# Logging
+logging:
+  level: info
+  file: logs/ucxsync.log
+  max_size: 100  # MB
+  max_backups: 5
+  max_age: 30  # days
+```
+
+## Usage
+
+### Start the application
+
+```bash
+# Start with default configuration
+./ucxsync
+
+# Start with custom config file
+./ucxsync --config /path/to/config.yaml
+
+# Start with custom web port
+./ucxsync --port 9090
+```
+
+### Access the web interface
+
+Open your browser and navigate to:
+```
+http://localhost:8080
+```
+
+### Command-line options
+
+```bash
+# Show help
+./ucxsync --help
+
+# Show version
+./ucxsync --version
+
+# Start with specific project and destination
+./ucxsync --project MyProject --dest /path/to/destination
+
+# Enable debug logging
+./ucxsync --debug
+```
+
+## Web Interface
+
+The web interface provides:
+
+1. **Control Panel**
+   - Project selection (auto-discovered from network)
+   - Destination path selection
+   - Parallelism configuration
+   - Start/Stop controls
+
+2. **Real-time Monitoring**
+   - Live log stream
+   - Completed captures counter
+   - Test captures counter
+   - Last capture number
+
+3. **Performance Metrics**
+   - CPU usage (with smoothing)
+   - Disk throughput
+   - Network throughput
+   - Free disk space
+
+4. **Activity Table**
+   - Per-node synchronization status
+   - Files downloaded per node
+   - Progress percentage
+   - Last update time
+
+## API Endpoints
+
+### REST API
+
+- `GET /api/projects` - List available projects
+- `GET /api/status` - Get current sync status
+- `POST /api/sync/start` - Start synchronization
+- `POST /api/sync/stop` - Stop synchronization
+
+### WebSocket
+
+- `ws://localhost:8080/ws` - Real-time updates
+  - `log` - Log messages
+  - `status` - Status updates
+  - `progress` - Progress updates
+  - `metrics` - Performance metrics
+
+## Capture File Format
+
+UCXSync automatically detects and tracks capture files:
+
+```
+Lvl0X-00001-T-ProjectName-00-00-SESSION_ID.raw
+│     │     │ │           └──┴──┴────────────── Session ID
+│     │     │ └────────────────────────────── Project Name
+│     │     └──────────────────────────────── Test marker (T or empty)
+│     └────────────────────────────────────── Capture Number
+└──────────────────────────────────────────── Data Type (Lvl01X, Lvl02X...)
+```
+
+A capture is considered complete when all 13 worker nodes (WU01-WU13) have copied the file.
+
+## Development
+
+### Project Structure
+
+- **cmd/ucxsync/** - Main application
+- **internal/config/** - Configuration loading and validation
+- **internal/sync/** - Core synchronization logic
+- **internal/monitor/** - System performance monitoring
+- **internal/network/** - Network authentication and mounting
+- **internal/storage/** - Settings persistence
+- **internal/web/** - HTTP server and WebSocket handlers
+- **pkg/models/** - Shared data structures
+- **web/** - Frontend assets
+
+### Building
+
+```bash
+# Build for current platform
+make build
+
+# Build for all platforms
+make build-all
+
+# Run tests
+make test
+
+# Run with live reload (requires air)
+make dev
+```
+
+### Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# Run with coverage
+go test -cover ./...
+
+# Run specific package tests
+go test ./internal/sync/...
+```
+
+## Linux Setup
+
+### Installing CIFS utilities
+
+```bash
+sudo apt-get update
+sudo apt-get install -y cifs-utils
+```
+
+### Network share mounting
+
+UCXSync automatically mounts network shares using CIFS. On first run:
+
+```bash
+# Run with sudo for initial setup
+sudo ./ucxsync
+
+# Creates mount points at /mnt/ucx/{node}/{share}
+# Stores credentials in /etc/ucxsync/credentials
+```
+
+### Running as systemd service
+
+```bash
+# Copy service file
+sudo cp ucxsync.service /etc/systemd/system/
+
+# Enable and start
+sudo systemctl enable ucxsync
+sudo systemctl start ucxsync
+
+# Check status
+sudo systemctl status ucxsync
+```
+
+### Mount points structure
+
+```
+/mnt/ucx/
+├── WU01/
+│   ├── E$/
+│   └── F$/
+├── WU02/
+│   ├── E$/
+│   └── F$/
+...
+└── CU/
+    ├── E$/
+    └── F$/
+```
+
+## Performance
+
+- **Throughput**: Up to 200 MB/s disk I/O
+- **Network**: Supports 1 Gbps links
+- **Parallelism**: Default 8 concurrent operations (configurable)
+- **Memory**: ~50-100 MB typical usage
+- **CPU**: Low overhead, <5% on modern systems
+
+## Troubleshooting
+
+### Cannot connect to network shares
+
+**Windows**: Ensure SMB1 is enabled
+```powershell
+Enable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol
+```
+
+**Linux**: Install CIFS utilities
+```bash
+sudo apt-get install cifs-utils
+```
+
+### Insufficient disk space
+
+Ensure at least 150 MB free space (50 MB minimum + 100 MB safety margin)
+
+### High CPU usage
+
+Reduce parallelism in configuration:
+```yaml
+sync:
+  max_parallelism: 4
+```
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Contributing
+
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## Support
+
+- Issues: https://github.com/zangezia/UCXSync/issues
+- Documentation: https://github.com/zangezia/UCXSync/wiki
+
+## Roadmap
+
+- [ ] Docker container support
+- [ ] Systemd service integration
+- [ ] Email notifications on capture completion
+- [ ] Grafana/Prometheus metrics export
+- [ ] REST API for external integrations
+- [ ] Multiple destination support
+- [ ] Bandwidth throttling
+- [ ] Resume interrupted transfers
