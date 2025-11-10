@@ -55,6 +55,32 @@ mkdir -p /var/log/ucxsync
 mkdir -p /mnt/ucx
 echo -e "${GREEN}✓${NC} Directories created"
 
+# Setup network hosts mapping
+echo ""
+echo "Setting up network hosts mapping..."
+HOSTS_MARKER="# UCXSync nodes"
+if ! grep -q "$HOSTS_MARKER" /etc/hosts; then
+    echo "" >> /etc/hosts
+    echo "$HOSTS_MARKER" >> /etc/hosts
+    echo "192.168.200.1    WU01" >> /etc/hosts
+    echo "192.168.200.2    WU02" >> /etc/hosts
+    echo "192.168.200.3    WU03" >> /etc/hosts
+    echo "192.168.200.4    WU04" >> /etc/hosts
+    echo "192.168.200.5    WU05" >> /etc/hosts
+    echo "192.168.200.6    WU06" >> /etc/hosts
+    echo "192.168.200.7    WU07" >> /etc/hosts
+    echo "192.168.200.8    WU08" >> /etc/hosts
+    echo "192.168.200.9    WU09" >> /etc/hosts
+    echo "192.168.200.10   WU10" >> /etc/hosts
+    echo "192.168.200.11   WU11" >> /etc/hosts
+    echo "192.168.200.12   WU12" >> /etc/hosts
+    echo "192.168.200.13   WU13" >> /etc/hosts
+    echo "192.168.200.201  CU" >> /etc/hosts
+    echo -e "${GREEN}✓${NC} Network hosts mapping added to /etc/hosts"
+else
+    echo -e "${YELLOW}⚠${NC}  Network hosts mapping already exists in /etc/hosts"
+fi
+
 # Install binary
 echo ""
 echo "Installing binary..."

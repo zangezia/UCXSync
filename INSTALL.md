@@ -50,6 +50,8 @@ The script will:
 - Build the application
 - Create necessary directories
 - Install binary to `/opt/ucxsync/`
+- Install web assets to `/opt/ucxsync/web/`
+- Configure network hosts mapping in `/etc/hosts` (192.168.200.1-13, 201)
 - Install systemd service
 - Set up configuration
 

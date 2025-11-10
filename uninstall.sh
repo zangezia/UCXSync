@@ -66,5 +66,18 @@ else
     echo -e "${YELLOW}⚠${NC}  Mount directory preserved"
 fi
 
+# Ask about hosts entries
+echo ""
+read -p "Remove UCXSync entries from /etc/hosts? [y/N] " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    sed -i '/# UCXSync nodes/,/^192\.168\.200\.201.*CU/d' /etc/hosts
+    # Remove empty lines left behind
+    sed -i '/^$/N;/^\n$/D' /etc/hosts
+    echo -e "${GREEN}✓${NC} Hosts entries removed"
+else
+    echo -e "${YELLOW}⚠${NC}  Hosts entries preserved"
+fi
+
 echo ""
 echo -e "${GREEN}Uninstallation complete!${NC}"
