@@ -13,7 +13,7 @@ import (
 	"github.com/zangezia/UCXSync/internal/config"
 	"github.com/zangezia/UCXSync/internal/monitor"
 	"github.com/zangezia/UCXSync/internal/network"
-	"github.com/zangezia/UCXSync/internal/sync"
+	syncService "github.com/zangezia/UCXSync/internal/sync"
 	"github.com/zangezia/UCXSync/pkg/models"
 )
 
@@ -26,7 +26,7 @@ var upgrader = websocket.Upgrader{
 // Server represents the web server
 type Server struct {
 	cfg         *config.Config
-	syncService *sync.Service
+	syncService *syncService.Service
 	monService  *monitor.Service
 	netService  *network.Service
 
@@ -36,7 +36,7 @@ type Server struct {
 
 // NewServer creates a new web server
 func NewServer(cfg *config.Config) *Server {
-	syncService := sync.New(
+	svc := syncService.New(
 		cfg.Nodes,
 		cfg.Shares,
 		"/mnt/ucx", // TODO: Get from config
@@ -58,7 +58,7 @@ func NewServer(cfg *config.Config) *Server {
 
 	return &Server{
 		cfg:         cfg,
-		syncService: syncService,
+		syncService: svc,
 		monService:  monService,
 		netService:  netService,
 		clients:     make(map[*websocket.Conn]bool),
