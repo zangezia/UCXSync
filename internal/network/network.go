@@ -179,8 +179,9 @@ func (s *Service) mountShare(uncPath, mountPoint, credFile string) error {
 		opts = append(opts, fmt.Sprintf("password=%s", s.password))
 	}
 
-	// Add SMB version options
-	opts = append(opts, "vers=3.0")
+	// Add SMB version options (SMB1 for legacy compatibility)
+	opts = append(opts, "vers=1.0")
+	opts = append(opts, "sec=ntlm")
 	opts = append(opts, "noperm")
 
 	args = append(args, strings.Join(opts, ","))
