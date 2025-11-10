@@ -18,9 +18,9 @@ import (
 
 // Service handles file synchronization operations
 type Service struct {
-	nodes         []string
-	shares        []string
-	baseMountDir  string // Base directory for mounted shares (e.g., /mnt/ucx)
+	nodes        []string
+	shares       []string
+	baseMountDir string // Base directory for mounted shares (e.g., /mnt/ucx)
 
 	mu                    sync.RWMutex
 	isRunning             bool
@@ -181,7 +181,7 @@ func (s *Service) FindProjects(ctx context.Context) ([]models.ProjectInfo, error
 				// Get mount point for this node/share
 				shareName := strings.TrimSuffix(share, "$")
 				root := filepath.Join(s.baseMountDir, node, shareName)
-				
+
 				entries, err := os.ReadDir(root)
 				if err != nil {
 					log.Debug().
@@ -253,7 +253,7 @@ func (s *Service) syncIteration(ctx context.Context, destDir string) {
 			}
 
 			key := fmt.Sprintf("%s-%s", node, share)
-			
+
 			// Get mount point for this node/share
 			shareName := strings.TrimSuffix(share, "$")
 			mountPoint := filepath.Join(s.baseMountDir, node, shareName)

@@ -13,13 +13,13 @@ import (
 
 // Service manages network share mounting on Linux
 type Service struct {
-	nodes      []string
-	shares     []string
-	username   string
-	password   string
+	nodes        []string
+	shares       []string
+	username     string
+	password     string
 	baseMountDir string
-	
-	mu sync.Mutex
+
+	mu      sync.Mutex
 	mounted map[string]bool // track mounted shares
 }
 
@@ -65,7 +65,7 @@ func (s *Service) MountAll() error {
 		for _, share := range s.shares {
 			// Convert share format (E$ -> E)
 			shareName := strings.TrimSuffix(share, "$")
-			
+
 			// Create mount point
 			mountPoint := filepath.Join(s.baseMountDir, node, shareName)
 			if err := os.MkdirAll(mountPoint, 0755); err != nil {

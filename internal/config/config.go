@@ -27,12 +27,12 @@ type Credentials struct {
 
 // Sync holds synchronization settings
 type Sync struct {
-	Project                string        `mapstructure:"project"`
-	Destination            string        `mapstructure:"destination"`
-	MaxParallelism         int           `mapstructure:"max_parallelism"`
-	ServiceLoopInterval    time.Duration `mapstructure:"service_loop_interval"`
-	MinFreeDiskSpace       int64         `mapstructure:"min_free_disk_space"`
-	DiskSpaceSafetyMargin  int64         `mapstructure:"disk_space_safety_margin"`
+	Project               string        `mapstructure:"project"`
+	Destination           string        `mapstructure:"destination"`
+	MaxParallelism        int           `mapstructure:"max_parallelism"`
+	ServiceLoopInterval   time.Duration `mapstructure:"service_loop_interval"`
+	MinFreeDiskSpace      int64         `mapstructure:"min_free_disk_space"`
+	DiskSpaceSafetyMargin int64         `mapstructure:"disk_space_safety_margin"`
 }
 
 // Web holds web server settings
@@ -119,7 +119,7 @@ func setDefaults(v *viper.Viper) {
 	// Sync defaults
 	v.SetDefault("sync.max_parallelism", 8)
 	v.SetDefault("sync.service_loop_interval", "10s")
-	v.SetDefault("sync.min_free_disk_space", 52428800)    // 50 MB
+	v.SetDefault("sync.min_free_disk_space", 52428800)       // 50 MB
 	v.SetDefault("sync.disk_space_safety_margin", 104857600) // 100 MB
 
 	// Web defaults

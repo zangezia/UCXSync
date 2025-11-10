@@ -11,7 +11,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/zangezia/UCXSync/internal/config"
-	"github.com/zangezia/UCXSync/internal/network"
 	"github.com/zangezia/UCXSync/internal/web"
 )
 
@@ -119,7 +118,7 @@ func runApp(cmd *cobra.Command, args []string) {
 
 	// Start web server
 	server := web.NewServer(cfg)
-	
+
 	log.Info().
 		Str("address", fmt.Sprintf("http://%s:%d", cfg.Web.Host, cfg.Web.Port)).
 		Msg("Starting web interface...")
@@ -146,9 +145,9 @@ func setupLogging() {
 
 	if debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-		log.Logger = log.Output(zerolog.ConsoleOutput{Out: os.Stderr})
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	} else {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-		log.Logger = log.Output(zerolog.ConsoleOutput{Out: os.Stdout})
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 	}
 }

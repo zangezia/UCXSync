@@ -83,10 +83,10 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Setup routes
 	mux := http.NewServeMux()
-	
+
 	// Static files
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
-	
+
 	// API endpoints
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/projects", s.handleGetProjects)
@@ -114,7 +114,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Graceful shutdown
 	log.Info().Msg("Shutting down web server...")
-	
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

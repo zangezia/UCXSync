@@ -18,23 +18,23 @@ type SyncTask struct {
 
 // CaptureInfo holds information about a capture file
 type CaptureInfo struct {
-	DataType      string `json:"data_type"`       // Lvl01X, Lvl02X, etc.
-	CaptureNumber string `json:"capture_number"`  // 00001, 00002, etc.
-	IsTest        bool   `json:"is_test"`         // true if test capture
+	DataType      string `json:"data_type"`      // Lvl01X, Lvl02X, etc.
+	CaptureNumber string `json:"capture_number"` // 00001, 00002, etc.
+	IsTest        bool   `json:"is_test"`        // true if test capture
 	ProjectName   string `json:"project_name"`
 	SessionID     string `json:"session_id"`
 }
 
 // SyncStatus holds overall synchronization status
 type SyncStatus struct {
-	IsRunning              bool        `json:"is_running"`
-	Project                string      `json:"project"`
-	Destination            string      `json:"destination"`
-	CompletedCaptures      int         `json:"completed_captures"`
-	CompletedTestCaptures  int         `json:"completed_test_captures"`
-	LastCaptureNumber      string      `json:"last_capture_number"`
-	LastTestCaptureNumber  string      `json:"last_test_capture_number"`
-	ActiveTasks            []SyncTask  `json:"active_tasks"`
+	IsRunning             bool       `json:"is_running"`
+	Project               string     `json:"project"`
+	Destination           string     `json:"destination"`
+	CompletedCaptures     int        `json:"completed_captures"`
+	CompletedTestCaptures int        `json:"completed_test_captures"`
+	LastCaptureNumber     string     `json:"last_capture_number"`
+	LastTestCaptureNumber string     `json:"last_test_capture_number"`
+	ActiveTasks           []SyncTask `json:"active_tasks"`
 }
 
 // PerformanceMetrics holds system performance data

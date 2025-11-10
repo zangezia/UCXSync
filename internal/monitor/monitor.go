@@ -83,7 +83,7 @@ func (s *Service) collectMetrics() models.PerformanceMetrics {
 		if len(s.cpuReadings) > s.cpuSmoothingSamples {
 			s.cpuReadings = s.cpuReadings[1:]
 		}
-		
+
 		// Calculate average
 		var sum float64
 		for _, v := range s.cpuReadings {
@@ -116,7 +116,7 @@ func (s *Service) collectMetrics() models.PerformanceMetrics {
 				readBytes += counter.ReadBytes
 				writeBytes += counter.WriteBytes
 			}
-			
+
 			totalBytes := float64(readBytes + writeBytes)
 			metrics.DiskBytesPerSec = totalBytes
 			metrics.DiskMBps = totalBytes / 1024.0 / 1024.0
@@ -148,7 +148,7 @@ func (s *Service) collectMetrics() models.PerformanceMetrics {
 				bytesDiff := float64(currentBytes - s.lastNetBytes)
 				metrics.NetworkBytesPerSec = bytesDiff / elapsed
 				metrics.NetworkMBps = metrics.NetworkBytesPerSec / 1024.0 / 1024.0
-				
+
 				// Calculate percentage of 1 Gbps
 				bps := metrics.NetworkBytesPerSec * 8 // bytes to bits
 				metrics.NetworkPercent = (bps / float64(s.networkSpeedBps)) * 100.0
