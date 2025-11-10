@@ -179,9 +179,11 @@ func (s *Service) mountShare(uncPath, mountPoint, credFile string) error {
 		opts = append(opts, fmt.Sprintf("password=%s", s.password))
 	}
 
-	// Add SMB options (SMB1 required for Windows XP)
+	// Add SMB options for Windows XP compatibility
 	opts = append(opts, "vers=1.0")
+	opts = append(opts, "sec=ntlm")      // NTLM authentication for XP
 	opts = append(opts, "noperm")
+	opts = append(opts, "noserverino")   // Don't use server inode numbers (XP compatibility)
 
 	args = append(args, strings.Join(opts, ","))
 
