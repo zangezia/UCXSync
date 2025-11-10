@@ -59,6 +59,16 @@ type ProjectInfo struct {
 	Source string `json:"source"` // First node/share where found
 }
 
+// DestinationInfo holds information about available destination paths
+type DestinationInfo struct {
+	Path        string  `json:"path"`
+	Label       string  `json:"label"`
+	Type        string  `json:"type"` // "usb", "disk", "network"
+	FreeSpaceGB float64 `json:"free_space_gb"`
+	TotalGB     float64 `json:"total_gb"`
+	IsDefault   bool    `json:"is_default"`
+}
+
 // LogMessage represents a log entry
 type LogMessage struct {
 	Timestamp time.Time `json:"timestamp"`

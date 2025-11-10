@@ -14,7 +14,8 @@ class UCXSyncApp {
     initElements() {
         // Controls
         this.projectSelect = document.getElementById('project');
-        this.destinationInput = document.getElementById('destination');
+        this.destinationSelect = document.getElementById('destination');
+        this.destinationCustom = document.getElementById('destination-custom');
         this.parallelismInput = document.getElementById('parallelism');
         this.startBtn = document.getElementById('start-btn');
         this.stopBtn = document.getElementById('stop-btn');
@@ -50,11 +51,15 @@ class UCXSyncApp {
     initEventListeners() {
         this.startBtn.addEventListener('click', () => this.startSync());
         this.stopBtn.addEventListener('click', () => this.stopSync());
-        this.refreshBtn.addEventListener('click', () => this.loadProjects());
+        this.refreshBtn.addEventListener('click', () => {
+            this.loadProjects();
+            this.loadDestinations();
+        });
 
         // Auto-save settings
         this.projectSelect.addEventListener('change', () => this.saveSettings());
-        this.destinationInput.addEventListener('change', () => this.saveSettings());
+        this.destinationSelect.addEventListener('change', () => this.saveSettings());
+        this.destinationCustom.addEventListener('change', () => this.saveSettings());
         this.parallelismInput.addEventListener('change', () => this.saveSettings());
     }
 
@@ -145,9 +150,48 @@ class UCXSyncApp {
         }
     }
 
+    async loadDestinations() {
+        this.log('Поиск дисков...', 'info');
+
+        try {
+            const response = await fetch('/api/destinations');
+            if (!response.ok) throw new Error('Failed to load destinations');
+
+            const destinations = await response.json();
+            
+            this.destinationSelect.innerHTML = '<option value="">-- Выберите диск --</option>';
+            destinations.forEach(dest => {
+                const option = document.createElement('option');
+                option.value = dest.path;
+                
+                const icon = dest.type === 'usb' ? '💾' : '💿';
+                const freeSpace = dest.free_space_gb.toFixed(1);
+                const totalSpace = dest.total_gb.toFixed(1);
+                
+                option.textContent = `${icon} ${dest.label} - ${freeSpace}/${totalSpace} GB свободно`;
+                
+                if (dest.is_default) {
+                    option.selected = true;
+                }
+                
+                this.destinationSelect.appendChild(option);
+            });
+
+            this.log(`✓ Найдено дисков: ${destinations.length}`, 'success');
+        } catch (error) {
+            this.log(`✗ Ошибка загрузки дисков: ${error.message}`, 'error');
+        }
+    }
+
     async startSync() {
         const project = this.projectSelect.value;
-        const destination = this.destinationInput.value;
+        let destination = this.destinationSelect.value;
+        
+        // If custom path is entered, use it instead
+        if (this.destinationCustom.value.trim()) {
+            destination = this.destinationCustom.value.trim();
+        }
+        
         const parallelism = parseInt(this.parallelismInput.value);
 
         if (!project || !destination) {
@@ -284,7 +328,8 @@ class UCXSyncApp {
     saveSettings() {
         const settings = {
             project: this.projectSelect.value,
-            destination: this.destinationInput.value,
+            destination: this.destinationSelect.value,
+            destinationCustom: this.destinationCustom.value,
             parallelism: this.parallelismInput.value
         };
         localStorage.setItem('ucxsync_settings', JSON.stringify(settings));
@@ -295,15 +340,16 @@ class UCXSyncApp {
         if (saved) {
             try {
                 const settings = JSON.parse(saved);
-                if (settings.destination) this.destinationInput.value = settings.destination;
+                if (settings.destinationCustom) this.destinationCustom.value = settings.destinationCustom;
                 if (settings.parallelism) this.parallelismInput.value = settings.parallelism;
             } catch (error) {
                 console.error('Failed to load saved settings:', error);
             }
         }
 
-        // Load projects on startup
+        // Load projects and destinations on startup
         this.loadProjects();
+        this.loadDestinations();
     }
 }
 

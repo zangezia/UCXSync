@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -120,6 +123,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// API endpoints
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/projects", s.handleGetProjects)
+	mux.HandleFunc("/api/destinations", s.handleGetDestinations)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
 	mux.HandleFunc("/api/sync/start", s.handleStartSync)
 	mux.HandleFunc("/api/sync/stop", s.handleStopSync)
@@ -182,6 +186,18 @@ func (s *Server) handleGetProjects(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(projects)
+}
+
+func (s *Server) handleGetDestinations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	destinations := s.getAvailableDestinations()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(destinations)
 }
 
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
@@ -360,4 +376,99 @@ func (s *Server) broadcastMetrics(ctx context.Context, metricsChan <-chan models
 			})
 		}
 	}
+}
+
+// getAvailableDestinations scans for available storage destinations
+func (s *Server) getAvailableDestinations() []models.DestinationInfo {
+	var destinations []models.DestinationInfo
+
+	// Read mount points from /proc/mounts
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to read /proc/mounts")
+		return destinations
+	}
+
+	lines := strings.Split(string(data), "\n")
+	seen := make(map[string]bool)
+
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+
+		device := fields[0]
+		mountPoint := fields[1]
+		fsType := fields[2]
+
+		// Skip if already processed
+		if seen[mountPoint] {
+			continue
+		}
+		seen[mountPoint] = true
+
+		// Determine if this is a USB device or regular disk
+		var destType string
+		var label string
+		isDefault := false
+
+		// USB devices (typically /dev/sd* mounted on /media or /mnt)
+		if strings.HasPrefix(device, "/dev/sd") && 
+		   (strings.HasPrefix(mountPoint, "/media/") || 
+		    strings.HasPrefix(mountPoint, "/mnt/") && !strings.HasPrefix(mountPoint, "/mnt/ucx")) {
+			destType = "usb"
+			label = fmt.Sprintf("USB: %s", filepath.Base(mountPoint))
+		} else if fsType == "ext4" || fsType == "xfs" || fsType == "btrfs" {
+			// Regular disk partitions
+			if mountPoint == "/" {
+				destType = "disk"
+				label = "System Root (/)"
+				isDefault = true
+			} else if strings.HasPrefix(mountPoint, "/home") {
+				destType = "disk"
+				label = fmt.Sprintf("Home: %s", mountPoint)
+			} else if strings.HasPrefix(mountPoint, "/data") || strings.HasPrefix(mountPoint, "/storage") {
+				destType = "disk"
+				label = fmt.Sprintf("Data: %s", mountPoint)
+			} else {
+				continue // Skip other system mounts
+			}
+		} else {
+			continue // Skip network mounts, tmpfs, etc.
+		}
+
+		// Get disk space info
+		var stat syscall.Statfs_t
+		if err := syscall.Statfs(mountPoint, &stat); err != nil {
+			continue
+		}
+
+		totalGB := float64(stat.Blocks*uint64(stat.Bsize)) / 1024 / 1024 / 1024
+		freeGB := float64(stat.Bavail*uint64(stat.Bsize)) / 1024 / 1024 / 1024
+
+		// Only include mounts with reasonable space (> 1GB total)
+		if totalGB < 1 {
+			continue
+		}
+
+		destinations = append(destinations, models.DestinationInfo{
+			Path:        mountPoint,
+			Label:       label,
+			Type:        destType,
+			FreeSpaceGB: freeGB,
+			TotalGB:     totalGB,
+			IsDefault:   isDefault,
+		})
+	}
+
+	// Sort: USB first, then disk, then by path
+	sort.Slice(destinations, func(i, j int) bool {
+		if destinations[i].Type != destinations[j].Type {
+			return destinations[i].Type == "usb"
+		}
+		return destinations[i].Path < destinations[j].Path
+	})
+
+	return destinations
 }
