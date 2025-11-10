@@ -62,6 +62,12 @@ cp ucxsync /opt/ucxsync/
 chmod +x /opt/ucxsync/ucxsync
 echo -e "${GREEN}✓${NC} Binary installed to /opt/ucxsync/ucxsync"
 
+# Install web assets
+echo ""
+echo "Installing web assets..."
+cp -r web /opt/ucxsync/
+echo -e "${GREEN}✓${NC} Web assets installed to /opt/ucxsync/web"
+
 # Install config
 if [ ! -f /etc/ucxsync/config.yaml ]; then
     echo ""

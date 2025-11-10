@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -29,9 +31,35 @@ type Server struct {
 	syncService *syncService.Service
 	monService  *monitor.Service
 	netService  *network.Service
+	webRoot     string
 
 	mu      sync.RWMutex
 	clients map[*websocket.Conn]bool
+}
+
+// getWebRoot determines the web assets directory
+func getWebRoot() string {
+	// Try current directory first
+	if _, err := os.Stat("web"); err == nil {
+		return "web"
+	}
+	
+	// Try installed location
+	if _, err := os.Stat("/opt/ucxsync/web"); err == nil {
+		return "/opt/ucxsync/web"
+	}
+	
+	// Try executable directory
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		webPath := filepath.Join(exeDir, "web")
+		if _, err := os.Stat(webPath); err == nil {
+			return webPath
+		}
+	}
+	
+	// Default to current directory
+	return "web"
 }
 
 // NewServer creates a new web server
@@ -61,6 +89,7 @@ func NewServer(cfg *config.Config) *Server {
 		syncService: svc,
 		monService:  monService,
 		netService:  netService,
+		webRoot:     getWebRoot(),
 		clients:     make(map[*websocket.Conn]bool),
 	}
 }
@@ -85,7 +114,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
 	// Static files
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+	staticPath := filepath.Join(s.webRoot, "static")
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(staticPath))))
 
 	// API endpoints
 	mux.HandleFunc("/", s.handleIndex)
@@ -130,7 +160,8 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "web/templates/index.html")
+	indexPath := filepath.Join(s.webRoot, "templates", "index.html")
+	http.ServeFile(w, r, indexPath)
 }
 
 func (s *Server) handleGetProjects(w http.ResponseWriter, r *http.Request) {
