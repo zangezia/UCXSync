@@ -63,11 +63,11 @@ func (s *Service) MountAll() error {
 
 	for _, node := range s.nodes {
 		for _, share := range s.shares {
-			// Convert share format (E$ -> E)
-			shareName := strings.TrimSuffix(share, "$")
+			// Share name for mount point (without $)
+			shareNameClean := strings.TrimSuffix(share, "$")
 
 			// Create mount point
-			mountPoint := filepath.Join(s.baseMountDir, node, shareName)
+			mountPoint := filepath.Join(s.baseMountDir, node, shareNameClean)
 			if err := os.MkdirAll(mountPoint, 0755); err != nil {
 				errors = append(errors, fmt.Sprintf("%s/%s: %v", node, share, err))
 				continue
@@ -83,8 +83,8 @@ func (s *Service) MountAll() error {
 				continue
 			}
 
-			// Mount the share
-			uncPath := fmt.Sprintf("//%s/%s", node, shareName)
+			// Mount the share - use original share name (with $ if present)
+			uncPath := fmt.Sprintf("//%s/%s", node, share)
 			if err := s.mountShare(uncPath, mountPoint, credFile); err != nil {
 				errors = append(errors, fmt.Sprintf("%s/%s: %v", node, share, err))
 				log.Warn().
@@ -179,11 +179,8 @@ func (s *Service) mountShare(uncPath, mountPoint, credFile string) error {
 		opts = append(opts, fmt.Sprintf("password=%s", s.password))
 	}
 
-	// Add SMB options for Windows XP compatibility
+	// Minimal SMB1 options for Windows XP
 	opts = append(opts, "vers=1.0")
-	opts = append(opts, "sec=ntlm")      // NTLM authentication for XP
-	opts = append(opts, "noperm")
-	opts = append(opts, "noserverino")   // Don't use server inode numbers (XP compatibility)
 
 	args = append(args, strings.Join(opts, ","))
 
