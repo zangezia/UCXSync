@@ -29,7 +29,32 @@ git clone https://github.com/zangezia/UCXSync.git
 cd UCXSync
 ```
 
-### 2️⃣ Установка (автоматом)
+### 2️⃣ Подключение USB-SSD (ВАЖНО!)
+```bash
+# UCXSync копирует файлы на USB-SSD, а не на внутренний диск!
+
+# Найти USB-SSD устройство
+lsblk
+
+# Смонтировать (замените sda1 на ваше устройство)
+sudo mkdir -p /mnt/storage
+sudo mount /dev/sda1 /mnt/storage
+
+# Проверить
+df -h /mnt/storage
+
+# Создать директории
+sudo mkdir -p /mnt/storage/ucx /mnt/ucx
+sudo chown $USER:$USER /mnt/storage/ucx
+```
+
+**📁 Две директории:**
+- `/mnt/ucx` - временные точки монтирования UCX узлов (сеть)
+- `/mnt/storage/ucx` - USB-SSD для сохранения файлов (локально)
+
+Подробнее: см. `STORAGE-ARCHITECTURE.md`
+
+### 3️⃣ Установка (автоматом)
 ```bash
 chmod +x install.sh
 sudo ./install.sh
@@ -49,24 +74,31 @@ sudo nano /etc/ucxsync/config.yaml
 ```yaml
 # 1. Параллелизм (для AMD64 ноутбука)
 sync:
+  project: "Arh2k_mezen_200725"
+  destination: "/mnt/storage/ucx"  # USB-SSD!
   max_parallelism: 6  # 4-8 для ноутбука
 
-# 2. Путь к хранилищу
-destinations:
-  - path: "/mnt/storage/ucx"
-    min_free_gb: 100
-
-# 3. IP адреса UCX узлов
+# 2. Список UCX узлов
 nodes:
-  ucx01:
-    ip: "192.168.1.101"  # ← ИЗМЕНИТЬ!
-    username: "admin"     # ← ИЗМЕНИТЬ!
-    password: "password"  # ← ИЗМЕНИТЬ!
-    shares: ["share1"]
+  - WU01
+  - WU02
+  # ... все 14 узлов
+  - CU
+
+# 3. Сетевые шары
+shares:
+  - E$
+  - F$
+
+# 4. Учётные данные
+credentials:
+  username: "Administrator"  # ← ИЗМЕНИТЬ!
+  password: "ultracam"       # ← ИЗМЕНИТЬ!
 ```
 
 ### 4️⃣ Создание директорий
 ```bash
+# USB-SSD должен быть смонтирован в /mnt/storage!
 sudo mkdir -p /mnt/storage/ucx
 sudo mkdir -p /mnt/ucx
 sudo chown $USER:$USER /mnt/storage/ucx
