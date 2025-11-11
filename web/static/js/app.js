@@ -25,7 +25,8 @@ class UCXSyncApp {
         this.completedCapturesEl = document.getElementById('completed-captures');
         this.lastCaptureEl = document.getElementById('last-capture');
         this.testCapturesEl = document.getElementById('test-captures');
-        this.syncStatusEl = document.getElementById('sync-status');
+        this.activeOpsCountEl = document.getElementById('active-ops-count');
+        this.maxParallelismEl = document.getElementById('max-parallelism');
 
         // Metrics
         this.cpuProgress = document.getElementById('cpu-progress');
@@ -254,8 +255,20 @@ class UCXSyncApp {
         this.completedCapturesEl.textContent = status.completed_captures || 0;
         this.lastCaptureEl.textContent = status.last_capture_number || '-';
         this.testCapturesEl.textContent = status.completed_test_captures || 0;
-        this.syncStatusEl.textContent = status.is_running ? 'Работает' : 'Остановлено';
-        this.syncStatusEl.style.color = status.is_running ? 'var(--success-color)' : 'var(--text-secondary)';
+        
+        // Update parallelism info
+        this.activeOpsCountEl.textContent = status.active_file_operations || 0;
+        this.maxParallelismEl.textContent = status.max_parallelism || 8;
+        
+        // Color code based on usage
+        const usage = status.max_parallelism > 0 ? (status.active_file_operations / status.max_parallelism) : 0;
+        if (usage > 0.9) {
+            this.activeOpsCountEl.style.color = 'var(--danger-color)';
+        } else if (usage > 0.7) {
+            this.activeOpsCountEl.style.color = 'var(--warning-color)';
+        } else {
+            this.activeOpsCountEl.style.color = 'var(--success-color)';
+        }
 
         // Update activity table
         this.updateActivityTable(status.active_tasks || []);

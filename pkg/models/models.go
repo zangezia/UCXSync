@@ -32,6 +32,8 @@ type SyncStatus struct {
 	IsRunning             bool       `json:"is_running"`
 	Project               string     `json:"project"`
 	Destination           string     `json:"destination"`
+	MaxParallelism        int        `json:"max_parallelism"`        // Configured limit
+	ActiveFileOperations  int        `json:"active_file_operations"` // Current active file copies
 	CompletedCaptures     int        `json:"completed_captures"`
 	CompletedTestCaptures int        `json:"completed_test_captures"`
 	LastCaptureNumber     string     `json:"last_capture_number"`

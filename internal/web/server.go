@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -439,13 +438,10 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 		}
 
 		// Get disk space info
-		var stat syscall.Statfs_t
-		if err := syscall.Statfs(mountPoint, &stat); err != nil {
+		freeGB, totalGB, err := getDiskSpace(mountPoint)
+		if err != nil {
 			continue
 		}
-
-		totalGB := float64(stat.Blocks*uint64(stat.Bsize)) / 1024 / 1024 / 1024
-		freeGB := float64(stat.Bavail*uint64(stat.Bsize)) / 1024 / 1024 / 1024
 
 		// Only include mounts with reasonable space (> 1GB total)
 		if totalGB < 1 {

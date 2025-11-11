@@ -58,6 +58,7 @@ type Service struct {
 	project               string
 	destination           string
 	maxParallelism        int
+	globalSemaphore       chan struct{} // Global semaphore limiting total concurrent file operations
 	activeTasks           map[string]*taskInfo
 	captureTracker        map[string]map[string]bool // capture# -> fileType (raw/xml) -> completed
 	completedCaptures     int32
@@ -128,6 +129,7 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 	s.project = project
 	s.destination = destination
 	s.maxParallelism = maxParallelism
+	s.globalSemaphore = make(chan struct{}, maxParallelism) // Global limit across all tasks
 	s.isRunning = true
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -172,6 +174,7 @@ func (s *Service) Stop() {
 
 	s.isRunning = false
 	s.activeTasks = make(map[string]*taskInfo)
+	s.globalSemaphore = nil // Release semaphore
 
 	log.Info().Msg("Synchronization stopped")
 }
@@ -202,10 +205,18 @@ func (s *Service) GetStatus() models.SyncStatus {
 		})
 	}
 
+	// Calculate active file operations (semaphore usage)
+	activeOps := 0
+	if s.globalSemaphore != nil {
+		activeOps = len(s.globalSemaphore)
+	}
+
 	return models.SyncStatus{
 		IsRunning:             s.isRunning,
 		Project:               s.project,
 		Destination:           s.destination,
+		MaxParallelism:        s.maxParallelism,
+		ActiveFileOperations:  activeOps,
 		CompletedCaptures:     int(atomic.LoadInt32(&s.completedCaptures)),
 		CompletedTestCaptures: int(atomic.LoadInt32(&s.completedTestCaptures)),
 		LastCaptureNumber:     s.lastCaptureNumber,
@@ -391,21 +402,20 @@ func (s *Service) syncDirectory(ctx context.Context, task *taskInfo, source, des
 	atomic.StoreInt32(&task.totalFiles, int32(len(filesToCopy)))
 	atomic.StoreInt64(&task.totalBytes, totalBytes)
 
-	// Copy files with parallelism
-	sem := make(chan struct{}, s.maxParallelism)
+	// Copy files with parallelism (using global semaphore shared across all tasks)
 	var wg sync.WaitGroup
 
 	for _, file := range filesToCopy {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case sem <- struct{}{}:
+		case s.globalSemaphore <- struct{}{}:
 		}
 
 		wg.Add(1)
 		go func(filePath string) {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer func() { <-s.globalSemaphore }()
 
 			if err := s.copyFile(ctx, task, filePath, source, dest); err != nil {
 				atomic.AddInt32(&task.failedFiles, 1)

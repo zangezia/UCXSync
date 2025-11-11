@@ -1,4 +1,4 @@
-.PHONY: build run test clean install dev build-all
+.PHONY: build run test clean install dev build-riscv64 build-all
 
 APP_NAME=ucxsync
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -6,13 +6,15 @@ BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
 build:
-	go build $(LDFLAGS) -o $(APP_NAME) ./cmd/ucxsync
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(APP_NAME) ./cmd/ucxsync
 
-build-all:
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o bin/$(APP_NAME)-windows-amd64.exe ./cmd/ucxsync
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o bin/$(APP_NAME)-linux-amd64 ./cmd/ucxsync
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o bin/$(APP_NAME)-darwin-amd64 ./cmd/ucxsync
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o bin/$(APP_NAME)-darwin-arm64 ./cmd/ucxsync
+build-riscv64:
+	GOOS=linux GOARCH=riscv64 go build $(LDFLAGS) -o $(APP_NAME)-riscv64 ./cmd/ucxsync
+
+build-arm64:
+	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(APP_NAME)-arm64 ./cmd/ucxsync
+
+build-all: build build-riscv64 build-arm64
 
 run:
 	go run ./cmd/ucxsync

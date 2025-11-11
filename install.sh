@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# UCXSync Installation Script for Linux
+# UCXSync Installation Script for Linux (All architectures)
+# Supports: AMD64, ARM64, RISC-V 64
 #
 
 set -e
@@ -8,10 +9,41 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}UCXSync Installation${NC}"
-echo "======================================"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}       UCXSync Installation${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+
+# Detect architecture
+ARCH=$(uname -m)
+echo -e "${BLUE}Detected architecture: $ARCH${NC}"
+
+case "$ARCH" in
+    x86_64)
+        GOARCH="amd64"
+        GO_DOWNLOAD="go1.21.5.linux-amd64.tar.gz"
+        ;;
+    aarch64)
+        GOARCH="arm64"
+        GO_DOWNLOAD="go1.21.5.linux-arm64.tar.gz"
+        ;;
+    riscv64)
+        GOARCH="riscv64"
+        GO_DOWNLOAD="go1.21.5.linux-riscv64.tar.gz"
+        echo -e "${YELLOW}Note: RISC-V detected. For Orange Pi RV2, use ./install-orangepi.sh instead${NC}"
+        ;;
+    *)
+        echo -e "${RED}Unsupported architecture: $ARCH${NC}"
+        echo "Supported: x86_64 (AMD64), aarch64 (ARM64), riscv64"
+        exit 1
+        ;;
+esac
+
+echo -e "${GREEN}Target architecture: $GOARCH${NC}"
+echo ""
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -20,44 +52,81 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Detect OS
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    echo -e "${BLUE}OS: $NAME $VERSION${NC}"
+else
+    echo -e "${YELLOW}Warning: Cannot detect OS version${NC}"
+fi
+echo ""
+
 # Check prerequisites
-echo "Checking prerequisites..."
+echo -e "${GREEN}[1/6] Checking prerequisites...${NC}"
 
 # Check Go
 if ! command -v go &> /dev/null; then
-    echo -e "${YELLOW}Warning: Go is not installed${NC}"
-    echo "Install Go from: https://go.dev/dl/"
-    echo "Or run: wget https://go.dev/dl/go1.21.5.linux-amd64.tar.gz && tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz"
-    exit 1
+    echo -e "${YELLOW}Go is not installed. Installing...${NC}"
+    echo "Downloading $GO_DOWNLOAD..."
+    
+    wget -q https://go.dev/dl/$GO_DOWNLOAD -O /tmp/$GO_DOWNLOAD || {
+        echo -e "${RED}Failed to download Go${NC}"
+        echo "Please install Go manually from: https://go.dev/dl/"
+        exit 1
+    }
+    
+    tar -C /usr/local -xzf /tmp/$GO_DOWNLOAD
+    rm /tmp/$GO_DOWNLOAD
+    
+    # Add to PATH
+    if ! grep -q '/usr/local/go/bin' /etc/profile; then
+        echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+    fi
+    
+    export PATH=$PATH:/usr/local/go/bin
+    echo -e "${GREEN}✓ Go installed${NC}"
+else
+    GO_VERSION=$(go version | awk '{print $3}')
+    echo -e "${GREEN}✓ Go already installed: $GO_VERSION${NC}"
 fi
 
 # Check cifs-utils
-if ! dpkg -l | grep -q cifs-utils; then
+if ! dpkg -l | grep -q cifs-utils 2>/dev/null && ! rpm -q cifs-utils &>/dev/null; then
     echo -e "${YELLOW}Installing cifs-utils...${NC}"
-    apt-get update
-    apt-get install -y cifs-utils
+    
+    if command -v apt-get &> /dev/null; then
+        apt-get update -qq
+        apt-get install -y cifs-utils
+    elif command -v yum &> /dev/null; then
+        yum install -y cifs-utils
+    elif command -v dnf &> /dev/null; then
+        dnf install -y cifs-utils
+    else
+        echo -e "${RED}Cannot install cifs-utils automatically${NC}"
+        echo "Please install manually: apt-get install cifs-utils"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓ cifs-utils installed${NC}"
+else
+    echo -e "${GREEN}✓ cifs-utils already installed${NC}"
 fi
 
-echo -e "${GREEN}✓${NC} Prerequisites satisfied"
-
-# Build application
 echo ""
-echo "Building UCXSync..."
-go build -o ucxsync ./cmd/ucxsync
-echo -e "${GREEN}✓${NC} Build complete"
+echo -e "${GREEN}[2/6] Building UCXSync for $GOARCH...${NC}"
+GOOS=linux GOARCH=$GOARCH go build -ldflags "-X main.Version=1.1.0 -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" -o ucxsync ./cmd/ucxsync
+echo -e "${GREEN}✓ Build complete${NC}"
 
-# Create directories
 echo ""
-echo "Creating directories..."
+echo -e "${GREEN}[3/6] Creating directories...${NC}"
 mkdir -p /opt/ucxsync
 mkdir -p /etc/ucxsync
 mkdir -p /var/log/ucxsync
 mkdir -p /mnt/ucx
-echo -e "${GREEN}✓${NC} Directories created"
+echo -e "${GREEN}✓ Directories created${NC}"
 
-# Setup network hosts mapping
 echo ""
-echo "Setting up network hosts mapping..."
+echo -e "${GREEN}[4/6] Installing application...${NC}"
 HOSTS_MARKER="# UCXSync nodes"
 if ! grep -q "$HOSTS_MARKER" /etc/hosts; then
     echo "" >> /etc/hosts

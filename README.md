@@ -48,7 +48,9 @@ UCXSync/
 
 ## System Requirements
 
-- **OS**: Ubuntu 20.04+ or compatible Linux distribution
+- **OS**: Ubuntu 20.04+ (tested on Ubuntu Server 24.04, Orange Pi compatible)
+- **Architecture**: RISC-V 64-bit / ARM64 / AMD64
+- **Hardware**: Orange Pi RV2 (RISC-V) or compatible SBC
 - **Go**: 1.21 or higher (for building from source)
 - **CIFS**: `cifs-utils` package for SMB mounting
 - **Permissions**: sudo/root for mounting network shares
@@ -56,6 +58,28 @@ UCXSync/
 - **Network**: Access to UCX worker nodes (WU01-WU13, CU)
 
 ## Installation
+
+### Linux AMD64/x86_64 Servers
+
+For standard Linux servers (Ubuntu, Debian, CentOS, RHEL), see:
+**[📘 Linux Installation Guide](LINUX.md)**
+
+Quick install:
+```bash
+sudo chmod +x install.sh
+sudo ./install.sh
+```
+
+### Orange Pi RV2 (RISC-V)
+
+For Orange Pi RV2 with Ubuntu Server 24.04, see detailed guide:
+**[📘 Orange Pi Installation Guide](ORANGEPI.md)**
+
+Quick install:
+```bash
+sudo chmod +x install-orangepi.sh
+sudo ./install-orangepi.sh
+```
 
 ### From Source
 
