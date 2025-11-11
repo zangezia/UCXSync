@@ -29,10 +29,12 @@ credentials:
 
 # Synchronization settings (optimized for Orange Pi RV2 RISC-V)
 sync:
-  max_parallelism: 3              # Conservative for RISC-V CPU and USB storage
+  project: "Arh2k_mezen_200725"       # Project name
+  destination: "/mnt/storage"          # USB-SSD mount point (auto-mounted)
+  max_parallelism: 3                   # Conservative for RISC-V CPU and USB storage
   service_loop_interval: 10s
-  min_free_disk_space: 52428800      # 50 MB
-  disk_space_safety_margin: 104857600 # 100 MB
+  min_free_disk_space: 52428800        # 50 MB
+  disk_space_safety_margin: 104857600  # 100 MB
 
 # Web server
 web:

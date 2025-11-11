@@ -35,6 +35,8 @@ network:
 
 # Synchronization settings
 sync:
+  project: "Arh2k_mezen_200725"      # Project name (used in file paths)
+  destination: "/mnt/storage"         # USB-SSD mount point (auto-mounted)
   max_parallelism: 8
   service_loop_interval: 10s
   min_free_disk_space: 52428800      # 50 MB

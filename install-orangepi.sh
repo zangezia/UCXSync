@@ -84,19 +84,21 @@ echo -e "${GREEN}✓${NC} Created /mnt/storage (USB-SSD mount point)"
 # Check if USB-SSD is already mounted
 if mountpoint -q /mnt/storage; then
     echo -e "${GREEN}✓${NC} /mnt/storage is already mounted"
-    # Create UCX data directory on mounted storage
-    mkdir -p /mnt/storage/ucx
-    chown -R $SUDO_USER:$SUDO_USER /mnt/storage/ucx 2>/dev/null || true
-    echo -e "${GREEN}✓${NC} Created /mnt/storage/ucx for data"
+    
+    # Set permissions for user access
+    USER_NAME=${SUDO_USER:-$(whoami)}
+    chown -R $USER_NAME:$USER_NAME /mnt/storage 2>/dev/null || true
+    echo -e "${GREEN}✓${NC} Permissions set for /mnt/storage"
 else
     echo -e "${YELLOW}⚠${NC}  /mnt/storage is not mounted"
     echo -e "${YELLOW}⚠${NC}  You need to mount your USB-SSD to /mnt/storage"
     echo ""
-    echo "To mount USB-SSD:"
+    echo "Option 1 - Manual mount:"
     echo "  1. Find your device: lsblk"
     echo "  2. Mount it: sudo mount /dev/sdX1 /mnt/storage"
-    echo "  3. Create data dir: sudo mkdir -p /mnt/storage/ucx"
-    echo "  4. Set permissions: sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo ""
+    echo "Option 2 - Auto-mount (recommended):"
+    echo "  Run: sudo ./setup-usb-automount.sh"
     echo ""
 fi
 
@@ -195,10 +197,13 @@ echo "   sudo nano $CONFIG_DIR/config.yaml"
 echo ""
 echo "   Update these settings:"
 echo "   - sync.project (your project name)"
-echo "   - sync.destination (/mnt/storage/ucx)"
+echo "   - sync.destination (/mnt/storage)"
 echo "   - credentials.username and password"
 echo ""
-echo "2. Enable service to start on boot:"
+echo "2. Setup USB-SSD auto-mount (recommended):"
+echo "   sudo ./setup-usb-automount.sh"
+echo ""
+echo "3. Enable service to start on boot:"
 echo "   sudo systemctl enable ucxsync"
 echo ""
 echo "3. Start the service:"

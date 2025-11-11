@@ -38,19 +38,25 @@ sudo mkdir -p /mnt/ucx
 
 ---
 
-## 2️⃣ `/mnt/storage/ucx` - Внешние USB-SSD диски (ПОСТОЯННЫЕ)
+## 2️⃣ `/mnt/storage` - Внешний USB-SSD диск (ПОСТОЯННОЕ)
 
 ### Назначение
-Здесь хранятся **скопированные файлы** с UCX узлов на внешних USB-SSD дисках.
+Здесь хранятся **скопированные файлы** с UCX узлов на внешнем USB-SSD диске.
+
+### Параметр в конфиге
+```yaml
+sync:
+  destination: "/mnt/storage"  # Корень USB-SSD диска
+```
 
 ### Структура
 ```
-/mnt/storage/ucx/              ← точка монтирования USB-SSD
+/mnt/storage/               ← корень USB-SSD диска
 ├── WU01/
 │   ├── E$/
 │   │   └── Arh2k_mezen_200725/
-│   │       ├── Lvl00-00001-...-06-00-UUID.raw  (локальная копия)
-│   │       ├── Lvl00-00002-...-06-00-UUID.raw
+│   │       ├── Lvl00-00001-Arh2k_mezen_200725-06-00-UUID.raw
+│   │       ├── Lvl00-00002-Arh2k_mezen_200725-06-00-UUID.raw
 │   │       └── ...
 │   └── F$/
 ├── WU02/
@@ -62,9 +68,11 @@ sudo mkdir -p /mnt/ucx
 └── CU/
     └── F$/
         └── Arh2k_mezen_200725/
-            ├── EAD-00001-...-.xml  (метаданные)
+            ├── EAD-00001-Arh2k_mezen_200725-UUID.xml
             └── ...
 ```
+
+**Примечание:** Используется весь USB-SSD диск целиком для UCXSync. Если нужно хранить другие данные, создайте подпапку в конфиге: `destination: "/mnt/storage/ucx"`
 
 ### Характеристики
 - ✅ **Внешний USB-SSD диск** - подключается к ноутбуку/серверу
@@ -160,7 +168,7 @@ df -h /mnt/storage
 
 3. **Копирует на USB-SSD:**
    ```
-   /mnt/storage/ucx/WU01/E$/Arh2k_mezen_200725/file.raw
+   /mnt/storage/WU01/E$/Arh2k_mezen_200725/file.raw
    ```
 
 4. **Размонтирует сетевой диск:**
@@ -170,7 +178,7 @@ df -h /mnt/storage
 
 5. **Файлы остаются на USB-SSD:**
    ```
-   /mnt/storage/ucx/WU01/E$/... (локально на внешнем диске)
+   /mnt/storage/WU01/E$/... (локально на внешнем диске)
    ```
 
 ---
@@ -183,7 +191,7 @@ df -h /mnt/ucx
 # Не требует места - это просто директория для монтирования
 ```
 
-### `/mnt/storage/ucx` - USB-SSD хранилище
+### `/mnt/storage` - USB-SSD хранилище
 ```bash
 df -h /mnt/storage
 # Требуется: 500 GB - 2 TB
@@ -205,15 +213,14 @@ df -h /mnt/storage
 
 ```yaml
 sync:
-  destination: "/mnt/storage/ucx"  # Путь на USB-SSD диске
+  destination: "/mnt/storage"  # Весь USB-SSD диск для UCXSync
   max_parallelism: 8
 ```
 
-### Точки монтирования создаются автоматически:
-```yaml
-network:
-  base_mount_dir: /mnt/ucx  # Автоматически
-  auto_mount: true
+**Автоматическое монтирование:**
+Чтобы USB-SSD автоматически монтировался при подключении:
+```bash
+sudo ./setup-usb-automount.sh
 ```
 
 ---
@@ -234,7 +241,7 @@ df -h /mnt/storage/ucx
 
 ### 3. Проверьте права доступа
 ```bash
-ls -ld /mnt/storage/ucx
+ls -ld /mnt/storage
 # Должен быть владелец: ваш пользователь
 ```
 
@@ -282,10 +289,10 @@ sudo mount /dev/sda1 /mnt/storage
 **Решение:**
 ```bash
 # Исправить владельца
-sudo chown -R $USER:$USER /mnt/storage/ucx
+sudo chown -R $USER:$USER /mnt/storage
 
 # Исправить права
-sudo chmod -R 755 /mnt/storage/ucx
+sudo chmod -R 755 /mnt/storage
 ```
 
 ---
@@ -306,6 +313,6 @@ sudo chmod -R 755 /mnt/storage/ucx
 | Директория | Назначение | Тип | Место | Устройство |
 |-----------|------------|-----|-------|------------|
 | `/mnt/ucx` | Точки монтирования UCX узлов | Сетевые диски | 0 MB | Сеть |
-| `/mnt/storage/ucx` | Хранилище скопированных файлов | Локальное хранилище | 500GB-2TB | USB-SSD |
+| `/mnt/storage` | Хранилище скопированных файлов | Локальное хранилище | 500GB-2TB | USB-SSD |
 
-**Вывод:** UCXSync копирует файлы с сетевых UCX узлов (`/mnt/ucx`) на внешний USB-SSD (`/mnt/storage/ucx`).
+**Вывод:** UCXSync копирует файлы с сетевых UCX узлов (`/mnt/ucx`) на внешний USB-SSD (`/mnt/storage`).
