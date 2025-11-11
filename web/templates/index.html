@@ -32,6 +32,7 @@
                         <select id="destination" class="form-control">
                             <option value="">-- Выберите диск --</option>
                         </select>
+                        <button id="manage-devices-btn" class="btn btn-secondary">💾 Управление дисками</button>
                         <input type="text" id="destination-custom" class="form-control" placeholder="Или введите путь вручную" style="margin-left: 10px;">
                     </div>
                 </div>
@@ -146,6 +147,39 @@
         <footer>
             <p>UCXSync v1.0.0 | <span id="connection-status">🔴 Отключено</span></p>
         </footer>
+    </div>
+
+    <!-- Device Management Modal -->
+    <div id="device-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>💾 Управление дисками</h2>
+                <button class="modal-close" onclick="closeDeviceModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <table id="devices-table" class="devices-table">
+                    <thead>
+                        <tr>
+                            <th>Устройство</th>
+                            <th>Размер</th>
+                            <th>Тип ФС</th>
+                            <th>Метка</th>
+                            <th>Точка монтирования</th>
+                            <th>Действие</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devices-body">
+                        <tr>
+                            <td colspan="6" class="no-data">Загрузка...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeDeviceModal()">Закрыть</button>
+                <button class="btn btn-primary" onclick="refreshDevices()">🔄 Обновить</button>
+            </div>
+        </div>
     </div>
 
     <script src="/static/js/app.js"></script>

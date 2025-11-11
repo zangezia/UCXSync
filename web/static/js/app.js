@@ -20,6 +20,7 @@ class UCXSyncApp {
         this.startBtn = document.getElementById('start-btn');
         this.stopBtn = document.getElementById('stop-btn');
         this.refreshBtn = document.getElementById('refresh-projects');
+        this.manageDevicesBtn = document.getElementById('manage-devices-btn');
 
         // Status
         this.completedCapturesEl = document.getElementById('completed-captures');
@@ -47,6 +48,10 @@ class UCXSyncApp {
 
         // Connection status
         this.connectionStatus = document.getElementById('connection-status');
+
+        // Device modal
+        this.deviceModal = document.getElementById('device-modal');
+        this.devicesBody = document.getElementById('devices-body');
     }
 
     initEventListeners() {
@@ -56,6 +61,7 @@ class UCXSyncApp {
             this.loadProjects();
             this.loadDestinations();
         });
+        this.manageDevicesBtn.addEventListener('click', () => this.openDeviceModal());
 
         // Auto-save settings
         this.projectSelect.addEventListener('change', () => this.saveSettings());
@@ -372,6 +378,109 @@ class UCXSyncApp {
         this.loadProjects();
         this.loadDestinations();
     }
+
+    // Device management methods
+    async openDeviceModal() {
+        this.deviceModal.classList.add('active');
+        await this.loadDevices();
+    }
+
+    async loadDevices() {
+        this.devicesBody.innerHTML = '<tr><td colspan="6" class="no-data">Загрузка...</td></tr>';
+
+        try {
+            const response = await fetch('/api/devices');
+            if (!response.ok) throw new Error('Failed to load devices');
+
+            const devices = await response.json();
+
+            if (devices.length === 0) {
+                this.devicesBody.innerHTML = '<tr><td colspan="6" class="no-data">Устройства не найдены</td></tr>';
+                return;
+            }
+
+            this.devicesBody.innerHTML = devices.map(device => {
+                const mountStatus = device.is_mounted 
+                    ? `<span class="device-mounted">✓ ${device.mount_point}</span>`
+                    : `<span class="device-unmounted">Не смонтирован</span>`;
+
+                const actionBtn = device.is_mounted
+                    ? `<button class="btn-unmount" onclick="app.unmountDevice('${device.device_path}')">Размонтировать</button>`
+                    : `<button class="btn-mount" onclick="app.mountDevice('${device.device_path}')">Монтировать</button>`;
+
+                const removableIcon = device.is_removable ? '💾 ' : '💿 ';
+
+                return `
+                    <tr>
+                        <td>${removableIcon}${device.device_name}</td>
+                        <td>${device.size}</td>
+                        <td>${device.fstype || '-'}</td>
+                        <td>${device.label || '-'}</td>
+                        <td>${mountStatus}</td>
+                        <td>${actionBtn}</td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (error) {
+            this.log(`✗ Ошибка загрузки устройств: ${error.message}`, 'error');
+            this.devicesBody.innerHTML = '<tr><td colspan="6" class="no-data">Ошибка загрузки устройств</td></tr>';
+        }
+    }
+
+    async mountDevice(devicePath) {
+        try {
+            const response = await fetch('/api/devices/mount', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device_path: devicePath, action: 'mount' })
+            });
+
+            if (!response.ok) {
+                const error = await response.text();
+                throw new Error(error);
+            }
+
+            this.log(`✓ Устройство ${devicePath} смонтировано в /mnt/storage`, 'success');
+            
+            // Reload devices and destinations
+            await this.loadDevices();
+            await this.loadDestinations();
+        } catch (error) {
+            this.log(`✗ Ошибка монтирования: ${error.message}`, 'error');
+        }
+    }
+
+    async unmountDevice(devicePath) {
+        try {
+            const response = await fetch('/api/devices/mount', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device_path: devicePath, action: 'unmount' })
+            });
+
+            if (!response.ok) {
+                const error = await response.text();
+                throw new Error(error);
+            }
+
+            this.log(`✓ Устройство ${devicePath} размонтировано`, 'success');
+            
+            // Reload devices and destinations
+            await this.loadDevices();
+            await this.loadDestinations();
+        } catch (error) {
+            this.log(`✗ Ошибка размонтирования: ${error.message}`, 'error');
+        }
+    }
+}
+
+// Global functions for modal
+function closeDeviceModal() {
+    document.getElementById('device-modal').classList.remove('active');
+}
+
+function refreshDevices() {
+    window.app.loadDevices();
 }
 
 // Initialize app when DOM is ready
