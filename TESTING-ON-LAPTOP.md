@@ -99,29 +99,35 @@ sudo nano /etc/ucxsync/config.yaml
 ```yaml
 # 1. Параллелизм (для AMD64 ноутбука)
 sync:
-  max_parallelism: 6  # Рекомендуется 4-8 для ноутбука
+  project: "Arh2k_mezen_200725"    # Название проекта
+  destination: "/mnt/storage/ucx"   # USB-SSD диск!
+  max_parallelism: 6                # 4-8 для ноутбука
+  min_free_disk_space: 52428800     # 50 MB
 
-# 2. Проверьте путь к хранилищу
-destinations:
-  - path: "/mnt/storage/ucx"  # Должна существовать!
-    min_free_gb: 100          # Минимум свободного места
-
-# 3. IP адреса UCX узлов (САМОЕ ВАЖНОЕ!)
+# 2. Список UCX узлов
 nodes:
-  ucx01:
-    ip: "192.168.1.101"      # ← ПОМЕНЯЙ НА РЕАЛЬНЫЙ IP!
-    username: "admin"         # ← ПОМЕНЯЙ НА РЕАЛЬНОГО ЮЗЕРА!
-    password: "yourpassword"  # ← ПОМЕНЯЙ НА РЕАЛЬНЫЙ ПАРОЛЬ!
-    shares: ["share1"]        # ← СПИСОК ШАР НА ЭТОМ УЗЛЕ
-    
-  ucx02:
-    ip: "192.168.1.102"
-    username: "admin"
-    password: "yourpassword"
-    shares: ["share1"]
-  
-  # ... добавь остальные 12 узлов
+  - WU01
+  - WU02
+  - WU03
+  # ... добавьте все 14 узлов
+  - WU13
+  - CU
+
+# 3. Сетевые шары на узлах
+shares:
+  - E$
+  - F$
+
+# 4. Учётные данные для доступа к UCX узлам
+credentials:
+  username: "Administrator"  # ← ИЗМЕНИТЕ!
+  password: "ultracam"       # ← ИЗМЕНИТЕ!
 ```
+
+**Важно:** 
+- `/mnt/storage/ucx` - это путь на USB-SSD диске!
+- Узлы WU01-WU13, CU должны быть доступны по сети
+- См. `STORAGE-ARCHITECTURE.md` для деталей
 
 ---
 
