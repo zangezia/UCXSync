@@ -7,6 +7,22 @@ set -e
 echo "=== UCXSync Quick Test Script ==="
 echo ""
 
+# Удаляем предыдущую установку если была
+echo "=== Checking for previous installation ==="
+if [ -f "/usr/local/bin/ucxsync" ] || [ -d "/etc/ucxsync" ]; then
+    echo "⚠ Found previous installation. Removing..."
+    sudo systemctl stop ucxsync 2>/dev/null || true
+    sudo systemctl disable ucxsync 2>/dev/null || true
+    sudo rm -f /usr/local/bin/ucxsync
+    sudo rm -rf /etc/ucxsync
+    sudo rm -f /etc/systemd/system/ucxsync.service
+    sudo systemctl daemon-reload
+    echo "✓ Previous installation removed"
+else
+    echo "✓ No previous installation found"
+fi
+echo ""
+
 # Определяем архитектуру
 ARCH=$(uname -m)
 echo "✓ Архитектура: $ARCH"

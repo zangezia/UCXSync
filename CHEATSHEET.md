@@ -12,6 +12,17 @@ chmod +x QUICK-TEST.sh
 
 ## Или поэтапно
 
+### 0️⃣ Удаление старой версии (если была)
+```bash
+# Если UCXSync уже установлен - удаляем
+sudo systemctl stop ucxsync 2>/dev/null
+sudo systemctl disable ucxsync 2>/dev/null
+sudo rm -f /usr/local/bin/ucxsync
+sudo rm -rf /etc/ucxsync
+sudo rm -f /etc/systemd/system/ucxsync.service
+sudo systemctl daemon-reload
+```
+
 ### 1️⃣ Клонирование
 ```bash
 git clone https://github.com/zangezia/UCXSync.git

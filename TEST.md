@@ -2,6 +2,22 @@
 
 ## Быстрая установка и тест
 
+### 0. Удаление предыдущей установки (если была)
+
+```bash
+# Остановить и удалить старую версию
+sudo systemctl stop ucxsync 2>/dev/null
+sudo systemctl disable ucxsync 2>/dev/null
+sudo rm -f /usr/local/bin/ucxsync
+sudo rm -rf /etc/ucxsync
+sudo rm -f /etc/systemd/system/ucxsync.service
+sudo systemctl daemon-reload
+
+# Опционально: очистить старые данные
+# sudo rm -rf /mnt/storage/ucx/*
+# sudo rm -rf /mnt/ucx/*
+```
+
 ### 1. Клонирование репозитория
 
 ```bash

@@ -461,6 +461,34 @@ Contributions welcome! Please:
 4. Add tests
 5. Submit a pull request
 
+## 🗑️ Uninstallation
+
+To remove UCXSync from your system:
+
+```bash
+cd UCXSync
+chmod +x uninstall.sh
+sudo ./uninstall.sh
+```
+
+Or manually:
+
+```bash
+# Stop and disable service
+sudo systemctl stop ucxsync
+sudo systemctl disable ucxsync
+
+# Remove files
+sudo rm -f /usr/local/bin/ucxsync
+sudo rm -rf /etc/ucxsync
+sudo rm -f /etc/systemd/system/ucxsync.service
+sudo systemctl daemon-reload
+
+# Optionally remove data
+sudo rm -rf /mnt/storage/ucx
+sudo rm -rf /mnt/ucx
+```
+
 ## Support
 
 - Issues: https://github.com/zangezia/UCXSync/issues
