@@ -122,8 +122,37 @@ echo -e "${GREEN}[3/6] Creating directories...${NC}"
 mkdir -p /opt/ucxsync
 mkdir -p /etc/ucxsync
 mkdir -p /var/log/ucxsync
+
+# Create mount points for UCX nodes (network shares)
 mkdir -p /mnt/ucx
-echo -e "${GREEN}✓ Directories created${NC}"
+echo -e "${GREEN}✓${NC} Created /mnt/ucx (UCX network mount points)"
+
+# Create storage directory for USB-SSD
+mkdir -p /mnt/storage
+echo -e "${GREEN}✓${NC} Created /mnt/storage (USB-SSD mount point)"
+
+# Check if USB-SSD is already mounted
+if mountpoint -q /mnt/storage; then
+    echo -e "${GREEN}✓${NC} /mnt/storage is already mounted"
+    # Create UCX data directory on mounted storage
+    mkdir -p /mnt/storage/ucx
+    chown -R $SUDO_USER:$SUDO_USER /mnt/storage/ucx 2>/dev/null || chown -R $(whoami):$(whoami) /mnt/storage/ucx
+    echo -e "${GREEN}✓${NC} Created /mnt/storage/ucx for data"
+else
+    echo -e "${YELLOW}⚠${NC}  /mnt/storage is not mounted"
+    echo -e "${YELLOW}⚠${NC}  You need to mount your USB-SSD to /mnt/storage"
+    echo ""
+    echo "To mount USB-SSD:"
+    echo "  1. Find your device: lsblk"
+    echo "  2. Mount it: sudo mount /dev/sdX1 /mnt/storage"
+    echo "  3. Create data dir: sudo mkdir -p /mnt/storage/ucx"
+    echo "  4. Set permissions: sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo ""
+    echo "Or see USB-SSD-GUIDE.md for detailed instructions"
+    echo ""
+fi
+
+echo -e "${GREEN}✓${NC} Directories created"
 
 echo ""
 echo -e "${GREEN}[4/6] Installing application...${NC}"
@@ -192,18 +221,80 @@ chmod 600 /etc/ucxsync/config.yaml
 echo -e "${GREEN}✓${NC} Permissions set"
 
 echo ""
-echo -e "${GREEN}Installation complete!${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}   Installation complete!${NC}"
+echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "Next steps:"
-echo "  1. Edit configuration: nano /etc/ucxsync/config.yaml"
-echo "  2. Enable service: systemctl enable ucxsync"
-echo "  3. Start service: systemctl start ucxsync"
-echo "  4. Check status: systemctl status ucxsync"
-echo "  5. View logs: journalctl -u ucxsync -f"
-echo "  6. Access web UI: http://localhost:8080"
+echo -e "${BLUE}Binary installed:${NC} /usr/local/bin/ucxsync"
+echo -e "${BLUE}Configuration:${NC} /etc/ucxsync/config.yaml"
+echo -e "${BLUE}Service file:${NC} /etc/systemd/system/ucxsync.service"
 echo ""
-echo "To manually mount shares:"
-echo "  /opt/ucxsync/ucxsync mount"
+echo -e "${YELLOW}========================================${NC}"
+echo -e "${YELLOW}   IMPORTANT: USB-SSD Setup${NC}"
+echo -e "${YELLOW}========================================${NC}"
+
+# Check if USB-SSD is mounted
+if ! mountpoint -q /mnt/storage; then
+    echo ""
+    echo -e "${RED}⚠ USB-SSD is NOT mounted!${NC}"
+    echo ""
+    echo "UCXSync requires an external USB-SSD mounted at /mnt/storage"
+    echo ""
+    echo -e "${BLUE}Quick setup:${NC}"
+    echo "  1. Connect your USB-SSD"
+    echo "  2. Find device:    lsblk"
+    echo "  3. Mount:          sudo mount /dev/sdX1 /mnt/storage"
+    echo "  4. Create dir:     sudo mkdir -p /mnt/storage/ucx"
+    echo "  5. Set owner:      sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo ""
+    echo -e "${BLUE}See detailed guide:${NC} USB-SSD-GUIDE.md"
+    echo ""
+else
+    echo ""
+    echo -e "${GREEN}✓ USB-SSD is mounted at /mnt/storage${NC}"
+    
+    # Show storage info
+    STORAGE_INFO=$(df -h /mnt/storage | tail -1 | awk '{print $2 " total, " $4 " free"}')
+    echo -e "${BLUE}Storage:${NC} $STORAGE_INFO"
+    
+    if [ -d /mnt/storage/ucx ]; then
+        echo -e "${GREEN}✓ Data directory ready: /mnt/storage/ucx${NC}"
+    fi
+    echo ""
+fi
+
+echo -e "${YELLOW}========================================${NC}"
+echo -e "${YELLOW}   Next Steps${NC}"
+echo -e "${YELLOW}========================================${NC}"
 echo ""
-echo "To unmount shares:"
-echo "  /opt/ucxsync/ucxsync unmount"
+echo "1. ${BLUE}Edit configuration:${NC}"
+echo "   sudo nano /etc/ucxsync/config.yaml"
+echo ""
+echo "   Update these settings:"
+echo "   - sync.project (your project name)"
+echo "   - sync.destination (/mnt/storage/ucx)"
+echo "   - credentials.username and password"
+echo ""
+echo "2. ${BLUE}Enable auto-start:${NC}"
+echo "   sudo systemctl enable ucxsync"
+echo ""
+echo "3. ${BLUE}Start service:${NC}"
+echo "   sudo systemctl start ucxsync"
+echo ""
+echo "4. ${BLUE}Check status:${NC}"
+echo "   sudo systemctl status ucxsync"
+echo ""
+echo "5. ${BLUE}View logs:${NC}"
+echo "   sudo journalctl -u ucxsync -f"
+echo ""
+echo "6. ${BLUE}Access web interface:${NC}"
+echo "   http://localhost:8080"
+echo ""
+echo -e "${YELLOW}========================================${NC}"
+echo ""
+echo -e "${BLUE}Documentation:${NC}"
+echo "  - Quick start:        README.md"
+echo "  - USB-SSD setup:      USB-SSD-GUIDE.md"
+echo "  - Storage explained:  STORAGE-ARCHITECTURE.md"
+echo "  - Testing guide:      TESTING-ON-LAPTOP.md"
+echo ""

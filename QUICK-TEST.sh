@@ -106,13 +106,40 @@ fi
 
 # Создаем директории
 echo ""
-echo "=== Создание директорий ==="
-sudo mkdir -p /mnt/storage/ucx
-sudo mkdir -p /mnt/ucx
-sudo chown -R $USER:$USER /mnt/storage/ucx
-echo "✓ Директории созданы:"
-echo "   /mnt/storage/ucx - хранилище"
-echo "   /mnt/ucx - точки монтирования"
+echo "=== Creating directories ==="
+sudo mkdir -p /mnt/storage /mnt/ucx
+echo "✓ Created /mnt/storage (USB-SSD mount point)"
+echo "✓ Created /mnt/ucx (UCX network mount points)"
+
+# Проверяем USB-SSD
+if mountpoint -q /mnt/storage 2>/dev/null; then
+    echo "✓ /mnt/storage is already mounted"
+    sudo mkdir -p /mnt/storage/ucx
+    sudo chown -R $USER:$USER /mnt/storage/ucx
+    echo "✓ Created /mnt/storage/ucx for data"
+    
+    # Показываем информацию о диске
+    STORAGE_INFO=$(df -h /mnt/storage 2>/dev/null | tail -1 | awk '{print $2 " total, " $4 " free"}')
+    echo "Storage: $STORAGE_INFO"
+else
+    echo "⚠ /mnt/storage is NOT mounted"
+    echo ""
+    echo "USB-SSD is required for UCXSync!"
+    echo ""
+    echo "Quick mount:"
+    echo "  1. lsblk                                    # find your USB-SSD (e.g., sda1)"
+    echo "  2. sudo mount /dev/sda1 /mnt/storage        # mount it"
+    echo "  3. sudo mkdir -p /mnt/storage/ucx           # create data dir"
+    echo "  4. sudo chown -R \$USER:\$USER /mnt/storage/ucx  # set permissions"
+    echo ""
+    echo "See USB-SSD-GUIDE.md for details"
+    echo ""
+    read -p "Continue without USB-SSD? (yes/no): " -r
+    if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+        echo "Installation cancelled. Please mount USB-SSD first."
+        exit 1
+    fi
+fi
 
 # Проверяем версию
 echo ""
@@ -146,9 +173,26 @@ echo "✓ Systemd сервис установлен"
 
 echo ""
 echo "================================================================"
-echo "✓ Установка завершена успешно!"
+echo "✓ UCXSync has been installed successfully!"
 echo "================================================================"
 echo ""
+
+# Проверка USB-SSD
+if ! mountpoint -q /mnt/storage 2>/dev/null; then
+    echo "⚠ WARNING: USB-SSD is NOT mounted!"
+    echo ""
+    echo "UCXSync requires USB-SSD at /mnt/storage"
+    echo ""
+    echo "Mount your USB-SSD:"
+    echo "  1. lsblk"
+    echo "  2. sudo mount /dev/sdX1 /mnt/storage"
+    echo "  3. sudo mkdir -p /mnt/storage/ucx"
+    echo "  4. sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo ""
+    echo "See: USB-SSD-GUIDE.md"
+    echo ""
+fi
+
 echo "Следующие шаги:"
 echo ""
 echo "1. Отредактируйте конфигурацию:"

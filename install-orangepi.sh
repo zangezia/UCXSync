@@ -72,7 +72,33 @@ echo -e "${GREEN}[3/8] Creating directories...${NC}"
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$LOG_DIR"
+
+# Create mount points for UCX nodes (network shares)
 mkdir -p "$MOUNT_DIR"
+echo -e "${GREEN}✓${NC} Created $MOUNT_DIR (UCX network mount points)"
+
+# Create storage directory for USB-SSD
+mkdir -p /mnt/storage
+echo -e "${GREEN}✓${NC} Created /mnt/storage (USB-SSD mount point)"
+
+# Check if USB-SSD is already mounted
+if mountpoint -q /mnt/storage; then
+    echo -e "${GREEN}✓${NC} /mnt/storage is already mounted"
+    # Create UCX data directory on mounted storage
+    mkdir -p /mnt/storage/ucx
+    chown -R $SUDO_USER:$SUDO_USER /mnt/storage/ucx 2>/dev/null || true
+    echo -e "${GREEN}✓${NC} Created /mnt/storage/ucx for data"
+else
+    echo -e "${YELLOW}⚠${NC}  /mnt/storage is not mounted"
+    echo -e "${YELLOW}⚠${NC}  You need to mount your USB-SSD to /mnt/storage"
+    echo ""
+    echo "To mount USB-SSD:"
+    echo "  1. Find your device: lsblk"
+    echo "  2. Mount it: sudo mount /dev/sdX1 /mnt/storage"
+    echo "  3. Create data dir: sudo mkdir -p /mnt/storage/ucx"
+    echo "  4. Set permissions: sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo ""
+fi
 
 # Build binary for detected architecture (if Go is installed)
 if command -v go &> /dev/null; then
@@ -141,32 +167,60 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Installation completed successfully!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
+
+# Check USB-SSD status
+if ! mountpoint -q /mnt/storage; then
+    echo -e "${RED}⚠ WARNING: USB-SSD is NOT mounted!${NC}"
+    echo ""
+    echo "UCXSync requires an external USB-SSD mounted at /mnt/storage"
+    echo ""
+    echo -e "${YELLOW}Quick setup:${NC}"
+    echo "  1. Connect your USB-SSD"
+    echo "  2. Find device:    lsblk"
+    echo "  3. Mount:          sudo mount /dev/sdX1 /mnt/storage"
+    echo "  4. Create dir:     sudo mkdir -p /mnt/storage/ucx"
+    echo "  5. Set owner:      sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo ""
+else
+    echo -e "${GREEN}✓ USB-SSD is mounted at /mnt/storage${NC}"
+    STORAGE_INFO=$(df -h /mnt/storage 2>/dev/null | tail -1 | awk '{print $2 " total, " $4 " free"}')
+    echo -e "${YELLOW}Storage:${NC} $STORAGE_INFO"
+    echo ""
+fi
+
 echo -e "${YELLOW}Next steps:${NC}"
 echo ""
 echo "1. Edit configuration:"
 echo "   sudo nano $CONFIG_DIR/config.yaml"
 echo ""
-echo "2. Test mount (optional):"
-echo "   sudo $INSTALL_DIR/$BINARY_NAME mount"
+echo "   Update these settings:"
+echo "   - sync.project (your project name)"
+echo "   - sync.destination (/mnt/storage/ucx)"
+echo "   - credentials.username and password"
 echo ""
-echo "3. Enable service to start on boot:"
+echo "2. Enable service to start on boot:"
 echo "   sudo systemctl enable ucxsync"
 echo ""
-echo "4. Start the service:"
+echo "3. Start the service:"
 echo "   sudo systemctl start ucxsync"
 echo ""
-echo "5. Check status:"
+echo "4. Check status:"
 echo "   sudo systemctl status ucxsync"
 echo ""
-echo "6. View logs:"
+echo "5. View logs:"
 echo "   sudo journalctl -u ucxsync -f"
 echo ""
-echo "7. Access web interface:"
+echo "6. Access web interface:"
 echo "   http://$(hostname -I | awk '{print $1}'):8080"
 echo ""
-echo -e "${YELLOW}Orange Pi optimization tips:${NC}"
-echo "- Keep max_parallelism at 4 for better stability"
+echo -e "${YELLOW}Orange Pi RV2 optimization tips:${NC}"
+echo "- Keep max_parallelism at 3-4 for RISC-V (see config.orangepi.yaml)"
 echo "- Monitor CPU temperature: cat /sys/class/thermal/thermal_zone0/temp"
-echo "- Use external USB 3.0 drive for destination"
+echo "- Use USB 3.0 SSD for best performance (/mnt/storage)"
 echo "- Consider active cooling for 24/7 operation"
+echo ""
+echo -e "${YELLOW}Documentation:${NC}"
+echo "- Orange Pi guide:    ORANGEPI.md"
+echo "- USB-SSD setup:      USB-SSD-GUIDE.md"
+echo "- Storage explained:  STORAGE-ARCHITECTURE.md"
 echo ""
