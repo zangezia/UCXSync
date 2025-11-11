@@ -50,12 +50,36 @@ UCXSync/
 
 - **OS**: Ubuntu 20.04+ (tested on Ubuntu Server 24.04, Orange Pi compatible)
 - **Architecture**: RISC-V 64-bit / ARM64 / AMD64
-- **Hardware**: Orange Pi RV2 (RISC-V) or compatible SBC
+- **Hardware**: Orange Pi RV2 (RISC-V) or compatible SBC / Laptop / Server
 - **Go**: 1.21 or higher (for building from source)
 - **CIFS**: `cifs-utils` package for SMB mounting
 - **Permissions**: sudo/root for mounting network shares
-- **Disk**: Minimum 50 MB free disk space
+- **Storage**: 
+  - Internal: Minimum 50 MB for application
+  - **External USB-SSD**: 500GB - 2TB for data storage (recommended)
 - **Network**: Access to UCX worker nodes (WU01-WU13, CU)
+
+## 📚 Documentation
+
+### Quick Start Guides
+- **[🚀 Quick Start (Russian)](README.ru.md)** - Быстрый старт на русском
+- **[📋 Cheat Sheet](CHEATSHEET.md)** - Quick reference commands
+- **[🧪 Testing Guide](TESTING-ON-LAPTOP.md)** - Laptop testing instructions
+
+### Platform-Specific Guides
+- **[🐧 Linux AMD64](LINUX.md)** - Standard server installation
+- **[🍊 Orange Pi RV2](ORANGEPI.md)** - RISC-V specific guide
+- **[⚙️ RISC-V Details](RISCV.md)** - Architecture information
+
+### Architecture & Setup
+- **[📁 Storage Architecture](STORAGE-ARCHITECTURE.md)** - Understanding `/mnt/ucx` vs `/mnt/storage/ucx`
+- **[💾 USB-SSD Guide](USB-SSD-GUIDE.md)** - External storage setup and troubleshooting
+- **[🔧 Build Instructions](BUILD.md)** - Multi-architecture build guide
+- **[⚡ Parallelism](PARALLELISM.md)** - Understanding concurrency control
+
+### Maintenance
+- **[🧹 Uninstall Guide](UNINSTALL-GUIDE.md)** - Complete removal instructions
+- **[📊 Testing](TEST.md)** - Comprehensive testing procedures
 
 ## Installation
 
