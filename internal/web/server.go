@@ -399,7 +399,7 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 
 		device := fields[0]
 		mountPoint := fields[1]
-		fsType := fields[2]
+		// fsType := fields[2] // Not needed anymore
 
 		// Skip if already processed
 		if seen[mountPoint] {
@@ -412,29 +412,44 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 		var label string
 		isDefault := false
 
-		// USB devices (typically /dev/sd* mounted on /media or /mnt)
-		if strings.HasPrefix(device, "/dev/sd") &&
-			(strings.HasPrefix(mountPoint, "/media/") ||
-				strings.HasPrefix(mountPoint, "/mnt/") && !strings.HasPrefix(mountPoint, "/mnt/ucx")) {
+		// Skip system mounts - we only want external storage
+		// Skip: /, /boot, /home, /var, /tmp, /snap, etc.
+		if mountPoint == "/" || 
+			strings.HasPrefix(mountPoint, "/boot") ||
+			strings.HasPrefix(mountPoint, "/home") ||
+			strings.HasPrefix(mountPoint, "/var") ||
+			strings.HasPrefix(mountPoint, "/tmp") ||
+			strings.HasPrefix(mountPoint, "/snap") ||
+			strings.HasPrefix(mountPoint, "/sys") ||
+			strings.HasPrefix(mountPoint, "/proc") ||
+			strings.HasPrefix(mountPoint, "/dev") ||
+			strings.HasPrefix(mountPoint, "/run") {
+			continue
+		}
+
+		// Skip UCX network mounts
+		if strings.HasPrefix(mountPoint, "/mnt/ucx") {
+			continue
+		}
+
+		// Only allow external storage: /mnt/* and /media/*
+		if !strings.HasPrefix(mountPoint, "/mnt/") && !strings.HasPrefix(mountPoint, "/media/") {
+			continue
+		}
+
+		// USB/external storage devices
+		if strings.HasPrefix(device, "/dev/sd") || strings.HasPrefix(device, "/dev/nvme") {
 			destType = "usb"
-			label = fmt.Sprintf("USB: %s", filepath.Base(mountPoint))
-		} else if fsType == "ext4" || fsType == "xfs" || fsType == "btrfs" {
-			// Regular disk partitions
-			if mountPoint == "/" {
-				destType = "disk"
-				label = "System Root (/)"
+			
+			// Check if it's /mnt/storage (our default USB-SSD mount)
+			if mountPoint == "/mnt/storage" {
+				label = "USB-SSD Storage (default)"
 				isDefault = true
-			} else if strings.HasPrefix(mountPoint, "/home") {
-				destType = "disk"
-				label = fmt.Sprintf("Home: %s", mountPoint)
-			} else if strings.HasPrefix(mountPoint, "/data") || strings.HasPrefix(mountPoint, "/storage") {
-				destType = "disk"
-				label = fmt.Sprintf("Data: %s", mountPoint)
 			} else {
-				continue // Skip other system mounts
+				label = fmt.Sprintf("External: %s", filepath.Base(mountPoint))
 			}
 		} else {
-			continue // Skip network mounts, tmpfs, etc.
+			continue // Skip non-disk devices
 		}
 
 		// Get disk space info
