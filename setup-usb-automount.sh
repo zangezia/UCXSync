@@ -67,14 +67,16 @@ echo -e "${GREEN}✓${NC} Systemd units created"
 echo -e "${BLUE}[3/4] Creating udev rule...${NC}"
 
 cat > /etc/udev/rules.d/99-usb-storage-automount.rules << 'EOF'
-# Auto-mount first USB storage device to /mnt/storage
-# This rule triggers when a USB storage device is connected
+# Auto-mount USB/SCSI storage device to /mnt/storage
+# Samsung T7 and similar USB-SSD devices appear as SCSI, not USB
 
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{DEVTYPE}=="partition", \
-  RUN+="/usr/local/bin/ucxsync-mount-usb.sh %k"
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", \
+  KERNEL=="sd[b-z][0-9]", \
+  RUN+="/bin/systemd-run --no-block /usr/local/bin/ucxsync-mount-usb.sh %k"
 
-ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{DEVTYPE}=="partition", \
-  RUN+="/usr/local/bin/ucxsync-unmount-usb.sh %k"
+ACTION=="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", \
+  KERNEL=="sd[b-z][0-9]", \
+  RUN+="/bin/systemd-run --no-block /usr/local/bin/ucxsync-unmount-usb.sh %k"
 EOF
 
 # Create mount helper script
@@ -86,35 +88,46 @@ DEVICE="/dev/$1"
 MOUNT_POINT="/mnt/storage"
 LOCK_FILE="/var/lock/ucxsync-usb-mount"
 
+# Full paths for udev/systemd context
+MOUNT="/bin/mount"
+MKDIR="/bin/mkdir"
+MOUNTPOINT="/bin/mountpoint"
+CHMOD="/bin/chmod"
+CHOWN="/bin/chown"
+ID="/usr/bin/id"
+LOGGER="/usr/bin/logger"
+SLEEP="/bin/sleep"
+RMDIR="/bin/rmdir"
+
 # Only mount if nothing is mounted yet
-if ! mountpoint -q "$MOUNT_POINT"; then
+if ! $MOUNTPOINT -q "$MOUNT_POINT"; then
     # Create lock to prevent multiple mounts
-    if mkdir "$LOCK_FILE" 2>/dev/null; then
+    if $MKDIR "$LOCK_FILE" 2>/dev/null; then
         # Wait for device to be ready
-        sleep 2
+        $SLEEP 2
         
         # Create mount point if it doesn't exist
-        mkdir -p "$MOUNT_POINT"
+        $MKDIR -p "$MOUNT_POINT"
         
         # Mount the device
-        mount "$DEVICE" "$MOUNT_POINT" 2>/dev/null
+        $MOUNT "$DEVICE" "$MOUNT_POINT" 2>&1 | $LOGGER -t UCXSync
         
-        if mountpoint -q "$MOUNT_POINT"; then
-            logger "UCXSync: USB storage $DEVICE auto-mounted to $MOUNT_POINT"
+        if $MOUNTPOINT -q "$MOUNT_POINT"; then
+            $LOGGER -t UCXSync "USB storage $DEVICE auto-mounted to $MOUNT_POINT"
             
             # Set permissions for user access
-            chmod 755 "$MOUNT_POINT"
+            $CHMOD 755 "$MOUNT_POINT"
             
             # If ucxsync user exists, set ownership
-            if id ucxsync >/dev/null 2>&1; then
-                chown ucxsync:ucxsync "$MOUNT_POINT"
+            if $ID ucxsync >/dev/null 2>&1; then
+                $CHOWN ucxsync:ucxsync "$MOUNT_POINT"
             fi
         else
-            logger "UCXSync: Failed to mount USB storage $DEVICE"
+            $LOGGER -t UCXSync "Failed to mount USB storage $DEVICE"
         fi
         
         # Remove lock
-        rmdir "$LOCK_FILE"
+        $RMDIR "$LOCK_FILE"
     fi
 fi
 EOF
@@ -127,16 +140,22 @@ cat > /usr/local/bin/ucxsync-unmount-usb.sh << 'EOF'
 DEVICE="/dev/$1"
 MOUNT_POINT="/mnt/storage"
 
+# Full paths for udev/systemd context
+MOUNTPOINT="/bin/mountpoint"
+FINDMNT="/bin/findmnt"
+UMOUNT="/bin/umount"
+LOGGER="/usr/bin/logger"
+
 # Check if our device is mounted
-if mountpoint -q "$MOUNT_POINT"; then
-    MOUNTED_DEVICE=$(findmnt -n -o SOURCE "$MOUNT_POINT")
+if $MOUNTPOINT -q "$MOUNT_POINT"; then
+    MOUNTED_DEVICE=$($FINDMNT -n -o SOURCE "$MOUNT_POINT")
     if [ "$MOUNTED_DEVICE" = "$DEVICE" ]; then
         # Try to unmount
-        umount "$MOUNT_POINT" 2>/dev/null
+        $UMOUNT "$MOUNT_POINT" 2>/dev/null
         if [ $? -eq 0 ]; then
-            logger "UCXSync: USB storage $DEVICE auto-unmounted from $MOUNT_POINT"
+            $LOGGER -t UCXSync "USB storage $DEVICE auto-unmounted from $MOUNT_POINT"
         else
-            logger "UCXSync: Failed to unmount USB storage $DEVICE (device busy)"
+            $LOGGER -t UCXSync "Failed to unmount USB storage $DEVICE (device busy)"
         fi
     fi
 fi
