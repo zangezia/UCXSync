@@ -208,11 +208,13 @@ class UCXSyncApp {
 
             if (!response.ok) {
                 const error = await response.text();
-                throw new Error(error);
+                this.log(`✗ Ошибка запуска: ${error}`, 'error');
+                return;
             }
 
             this.isRunning = true;
             this.updateControlsState();
+            this.log(`✓ Синхронизация проекта '${project}' запущена`, 'success');
         } catch (error) {
             this.log(`✗ Ошибка запуска: ${error.message}`, 'error');
         }
@@ -221,10 +223,16 @@ class UCXSyncApp {
     async stopSync() {
         try {
             const response = await fetch('/api/sync/stop', { method: 'POST' });
-            if (!response.ok) throw new Error('Failed to stop sync');
+            
+            if (!response.ok) {
+                const error = await response.text();
+                this.log(`✗ Ошибка остановки: ${error}`, 'error');
+                return;
+            }
 
             this.isRunning = false;
             this.updateControlsState();
+            this.log('✓ Синхронизация остановлена', 'info');
         } catch (error) {
             this.log(`✗ Ошибка остановки: ${error.message}`, 'error');
         }
