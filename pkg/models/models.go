@@ -18,11 +18,13 @@ type SyncTask struct {
 
 // CaptureInfo holds information about a capture file
 type CaptureInfo struct {
-	DataType      string `json:"data_type"`      // Lvl01X, Lvl02X, etc.
+	DataType      string `json:"data_type"`      // Lvl0X (unverified) or Lvl00 (verified)
 	CaptureNumber string `json:"capture_number"` // 00001, 00002, etc.
-	IsTest        bool   `json:"is_test"`        // true if test capture
-	ProjectName   string `json:"project_name"`
-	SessionID     string `json:"session_id"`
+	IsTest        bool   `json:"is_test"`        // true if test capture (has "T-" marker)
+	ProjectName   string `json:"project_name"`   // e.g., Arh2k_mezen_200725
+	SensorCode    string `json:"sensor_code"`    // e.g., 06-00, 00-00, 00-01, etc.
+	SessionID     string `json:"session_id"`     // Unique session GUID
+	IsVerified    bool   `json:"is_verified"`    // true if Lvl00, false if Lvl0X
 }
 
 // SyncStatus holds overall synchronization status

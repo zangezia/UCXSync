@@ -1,5 +1,36 @@
 package sync
 
+// File synchronization service for UCX capture files.
+//
+// Capture file naming convention:
+//
+// RAW files (from WU01-WU13 nodes):
+//   Lvl00-00001-Arh2k_mezen_200725-06-00-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.raw
+//   Lvl0X-00002-T-Arh2k_mezen_200725-06-00-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.raw
+//
+// XML metadata files (from CU node):
+//   EAD-00001-Arh2k_mezen_200725-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.xml
+//
+// RAW format breakdown:
+//   Lvl00 or Lvl0X  - File type (Lvl00=verified, Lvl0X=unverified)
+//   00001           - Capture number (5 digits)
+//   T               - Test marker (optional, after capture number with dash)
+//   Arh2k_mezen_200725 - Project name
+//   06-00           - Sensor code (XX-YY format)
+//   BD11EBB0_...    - Session GUID (unique identifier)
+//   .raw            - File extension
+//
+// XML format breakdown:
+//   EAD             - Metadata file prefix
+//   00001           - Capture number (5 digits)
+//   Arh2k_mezen_200725 - Project name
+//   BD11EBB0_...    - Session GUID (unique identifier)
+//   .xml            - File extension
+//
+// Complete capture requirements:
+//   Normal capture: 13 RAW files (one per WU01-WU13) + 1 XML file (from CU) = 14 files total
+//   Test capture:   13 RAW files (one per WU01-WU13), XML file may be missing = 13 files total
+
 import (
 	"context"
 	"fmt"
@@ -28,7 +59,7 @@ type Service struct {
 	destination           string
 	maxParallelism        int
 	activeTasks           map[string]*taskInfo
-	captureTracker        map[string]map[string]bool // capture# -> node -> completed
+	captureTracker        map[string]map[string]bool // capture# -> fileType (raw/xml) -> completed
 	completedCaptures     int32
 	completedTestCaptures int32
 	lastCaptureNumber     string
@@ -51,7 +82,24 @@ type taskInfo struct {
 }
 
 var (
-	captureRegex = regexp.MustCompile(`^(Lvl\d+X)-(\d+)-(T-)?([^-]+)-\d+-\d+-([A-F0-9_]+)\.raw$`)
+	// RAW capture file name format (from WU01-WU13 nodes):
+	// Lvl0X or Lvl00 - file type (0X=unverified, 00=verified)
+	// 00001 - capture number
+	// T (optional) - test capture marker
+	// Arh2k_mezen_200725 - project name
+	// 06-00 - sensor code (00-00, 00-01, 00-02, 01-00, etc.)
+	// BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E - unique session ID
+	// .raw - file extension
+	captureRegex = regexp.MustCompile(`^(Lvl\d+X?)-(\d+)-?(T-)?([^-]+)-(\d+-\d+)-([A-F0-9_]+)\.raw$`)
+
+	// XML metadata file name format (from CU node):
+	// EAD - prefix for metadata
+	// 00001 - capture number
+	// Arh2k_mezen_200725 - project name
+	// BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E - unique session ID
+	// .xml - file extension
+	// Note: XML file may be missing for test captures
+	metadataRegex = regexp.MustCompile(`^EAD-(\d+)-([^-]+)-([A-F0-9_]+)\.xml$`)
 )
 
 // New creates a new sync service
@@ -489,40 +537,116 @@ func (s *Service) copyFile(ctx context.Context, task *taskInfo, sourcePath, sour
 }
 
 func (s *Service) trackCaptureCompletion(filename, node string) {
+	// Try to parse as RAW file first
 	info := parseCaptureFileName(filename)
-	if info == nil || info.CaptureNumber == "" {
+	if info == nil {
+		// Try to parse as XML metadata file
+		info = parseMetadataFileName(filename)
+		if info == nil {
+			return
+		}
+	}
+
+	if info.CaptureNumber == "" {
 		return
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	nodeMap, exists := s.captureTracker[info.CaptureNumber]
+	fileMap, exists := s.captureTracker[info.CaptureNumber]
 	if !exists {
-		nodeMap = make(map[string]bool)
-		s.captureTracker[info.CaptureNumber] = nodeMap
+		fileMap = make(map[string]bool)
+		s.captureTracker[info.CaptureNumber] = fileMap
 	}
 
-	nodeMap[node] = true
+	// Determine file type based on extension and content
+	fileExt := strings.ToLower(filepath.Ext(filename))
+	var fileKey string
 
-	// Check if all 13 worker nodes completed
-	if len(nodeMap) == 13 {
+	if fileExt == ".raw" {
+		// RAW files - track by node (13 files from WU01-WU13)
+		fileKey = fmt.Sprintf("raw:%s", node)
+	} else if fileExt == ".xml" {
+		// XML metadata file - single file from CU node (only for non-test captures)
+		fileKey = "xml:CU"
+	} else {
+		return // Unknown file type
+	}
+
+	// Skip if already tracked
+	if fileMap[fileKey] {
+		return
+	}
+
+	fileMap[fileKey] = true
+
+	// Count RAW and XML files separately
+	rawCount := 0
+	hasXML := false
+	for key := range fileMap {
+		if strings.HasPrefix(key, "raw:") {
+			rawCount++
+		} else if key == "xml:CU" {
+			hasXML = true
+		}
+	}
+
+	// Complete capture requirements:
+	// - Normal capture: 13 RAW files + 1 XML file = 14 total
+	// - Test capture: 13 RAW files (XML may be missing)
+	const requiredRAWFiles = 13
+	const requiredTotalFilesNormal = 14
+	const requiredTotalFilesTest = 13
+
+	log.Debug().
+		Str("capture", info.CaptureNumber).
+		Str("node", node).
+		Str("file_type", fileExt).
+		Bool("is_test", info.IsTest).
+		Int("raw_files", rawCount).
+		Bool("has_xml", hasXML).
+		Msgf("Capture progress: %d RAW + %s XML", rawCount, map[bool]string{true: "1", false: "0"}[hasXML])
+
+	// Check if capture is complete
+	isComplete := false
+	totalFiles := 0
+
+	if info.IsTest {
+		// Test captures: require only 13 RAW files (XML is optional/missing)
+		isComplete = rawCount == requiredRAWFiles
+		totalFiles = requiredTotalFilesTest
+	} else {
+		// Normal captures: require 13 RAW + 1 XML
+		isComplete = rawCount == requiredRAWFiles && hasXML
+		totalFiles = requiredTotalFilesNormal
+	}
+
+	if isComplete {
 		if info.IsTest {
 			atomic.AddInt32(&s.completedTestCaptures, 1)
 			s.lastTestCaptureNumber = info.CaptureNumber
 			log.Info().
 				Str("capture", info.CaptureNumber).
 				Str("project", info.ProjectName).
+				Str("type", info.DataType).
+				Bool("verified", info.IsVerified).
+				Str("sensor", info.SensorCode).
+				Str("session", info.SessionID).
 				Int("test_count", int(atomic.LoadInt32(&s.completedTestCaptures))).
-				Msg("✓ TEST capture completed (13/13)")
+				Msgf("✓ TEST capture completed (%d RAW files, XML not required)", totalFiles)
 		} else {
 			atomic.AddInt32(&s.completedCaptures, 1)
 			s.lastCaptureNumber = info.CaptureNumber
 			log.Info().
 				Str("capture", info.CaptureNumber).
 				Str("project", info.ProjectName).
+				Str("type", info.DataType).
+				Bool("verified", info.IsVerified).
+				Str("sensor", info.SensorCode).
+				Str("session", info.SessionID).
 				Int("total_count", int(atomic.LoadInt32(&s.completedCaptures))).
-				Msg("✓ Capture completed (13/13)")
+				Msgf("✓ Capture completed (13 RAW + 1 XML = %d files)", totalFiles)
 		}
 
 		delete(s.captureTracker, info.CaptureNumber)
@@ -536,16 +660,49 @@ func (s *Service) checkDiskSpace(path string) bool {
 
 func parseCaptureFileName(filename string) *models.CaptureInfo {
 	matches := captureRegex.FindStringSubmatch(filename)
-	if len(matches) != 6 {
+	if len(matches) != 7 {
 		return nil
 	}
 
+	dataType := matches[1]
+	captureNumber := matches[2]
+	testMarker := matches[3]
+	projectName := matches[4]
+	sensorCode := matches[5]
+	sessionID := matches[6]
+
+	// Determine if verified: Lvl00 = verified, Lvl0X = unverified
+	isVerified := dataType == "Lvl00"
+
 	return &models.CaptureInfo{
-		DataType:      matches[1],
-		CaptureNumber: matches[2],
-		IsTest:        matches[3] != "",
-		ProjectName:   matches[4],
-		SessionID:     matches[5],
+		DataType:      dataType,
+		CaptureNumber: captureNumber,
+		IsTest:        testMarker != "",
+		ProjectName:   projectName,
+		SensorCode:    sensorCode,
+		SessionID:     sessionID,
+		IsVerified:    isVerified,
+	}
+}
+
+func parseMetadataFileName(filename string) *models.CaptureInfo {
+	matches := metadataRegex.FindStringSubmatch(filename)
+	if len(matches) != 4 {
+		return nil
+	}
+
+	captureNumber := matches[1]
+	projectName := matches[2]
+	sessionID := matches[3]
+
+	return &models.CaptureInfo{
+		DataType:      "EAD",
+		CaptureNumber: captureNumber,
+		IsTest:        false, // XML files are only for non-test captures
+		ProjectName:   projectName,
+		SensorCode:    "",
+		SessionID:     sessionID,
+		IsVerified:    true,
 	}
 }
 

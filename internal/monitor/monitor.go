@@ -23,6 +23,8 @@ type Service struct {
 	cpuReadings    []float64
 	lastNetTime    time.Time
 	lastNetBytes   uint64
+	lastDiskTime   time.Time
+	lastDiskBytes  uint64
 	targetDiskPath string
 }
 
@@ -117,13 +119,25 @@ func (s *Service) collectMetrics() models.PerformanceMetrics {
 				writeBytes += counter.WriteBytes
 			}
 
-			totalBytes := float64(readBytes + writeBytes)
-			metrics.DiskBytesPerSec = totalBytes
-			metrics.DiskMBps = totalBytes / 1024.0 / 1024.0
-			metrics.DiskPercent = (metrics.DiskMBps / s.maxDiskMBps) * 100.0
-			if metrics.DiskPercent > 100 {
-				metrics.DiskPercent = 100
+			currentDiskBytes := readBytes + writeBytes
+			now := time.Now()
+
+			s.mu.Lock()
+			if !s.lastDiskTime.IsZero() {
+				elapsed := now.Sub(s.lastDiskTime).Seconds()
+				if elapsed > 0 {
+					bytesDiff := float64(currentDiskBytes - s.lastDiskBytes)
+					metrics.DiskBytesPerSec = bytesDiff / elapsed
+					metrics.DiskMBps = metrics.DiskBytesPerSec / 1024.0 / 1024.0
+					metrics.DiskPercent = (metrics.DiskMBps / s.maxDiskMBps) * 100.0
+					if metrics.DiskPercent > 100 {
+						metrics.DiskPercent = 100
+					}
+				}
 			}
+			s.lastDiskBytes = currentDiskBytes
+			s.lastDiskTime = now
+			s.mu.Unlock()
 		}
 
 		// Free disk space

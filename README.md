@@ -8,11 +8,16 @@ UCXSync is a Linux Go application that synchronizes files from multiple network 
 
 ### Key Features
 
-- **Multi-node synchronization**: Parallel copying from 14 worker nodes (WU01-WU13, CU)
+- **Multi-node synchronization**: Parallel copying from 14 nodes (WU01-WU13 worker nodes + CU control unit)
 - **Multiple sources**: Each node has 2 network shares (E$, F$) = 28 sources total
 - **Incremental sync**: Only copies new or modified files
 - **Configurable parallelism**: Adjustable concurrent file operations
 - **Capture tracking**: Automatic detection and tracking of completed captures
+  - Normal captures: 13 RAW + 1 XML = 14 files
+  - Test captures: 13 RAW files (XML optional)
+- **File type recognition**: Distinguishes verified (Lvl00) and unverified (Lvl0X) captures
+- **Test capture support**: Separate tracking for test captures (marked with "T")
+- **Metadata handling**: EAD XML files from CU node (may be missing for test captures)
 - **Web interface**: Real-time monitoring via browser
 - **Performance metrics**: Live CPU, disk, network, and memory monitoring
 - **CIFS/SMB mounting**: Automatic mounting of network shares
@@ -217,18 +222,79 @@ The web interface provides:
 
 ## Capture File Format
 
-UCXSync automatically detects and tracks capture files:
+UCXSync automatically detects and tracks capture files from 14 nodes:
 
+### File Naming Convention
+
+**RAW files** (13 files from WU01-WU13 nodes):
 ```
-Lvl0X-00001-T-ProjectName-00-00-SESSION_ID.raw
-│     │     │ │           └──┴──┴────────────── Session ID
-│     │     │ └────────────────────────────── Project Name
-│     │     └──────────────────────────────── Test marker (T or empty)
-│     └────────────────────────────────────── Capture Number
-└──────────────────────────────────────────── Data Type (Lvl01X, Lvl02X...)
+Lvl00-00001-Arh2k_mezen_200725-06-00-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.raw
+Lvl0X-00002-T-Arh2k_mezen_200725-06-00-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.raw
 ```
 
-A capture is considered complete when all 13 worker nodes (WU01-WU13) have copied the file.
+**XML metadata file** (1 file from CU node):
+```
+EAD-00001-Arh2k_mezen_200725-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.xml
+```
+
+### Format Structure
+
+**RAW file format:**
+```
+Lvl00-00001-T-Arh2k_mezen_200725-06-00-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.raw
+│     │     │ │                  │     └──────────────────────── Session GUID
+│     │     │ │                  └────────────────────────────── Sensor Code (XX-YY)
+│     │     │ └───────────────────────────────────────────────── Project Name
+│     │     └─────────────────────────────────────────────────── Test Marker (optional)
+│     └───────────────────────────────────────────────────────── Capture Number (5 digits)
+└─────────────────────────────────────────────────────────────── Data Type
+```
+
+**XML metadata format:**
+```
+EAD-00001-Arh2k_mezen_200725-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.xml
+│   │     │                  └──────────────────────────────────── Session GUID
+│   │     └─────────────────────────────────────────────────────── Project Name
+│   └───────────────────────────────────────────────────────────── Capture Number
+└───────────────────────────────────────────────────────────────── Metadata prefix (EAD)
+```
+
+### Field Descriptions
+
+**RAW files:**
+- **Data Type**: 
+  - `Lvl00` - Verified capture
+  - `Lvl0X` - Unverified capture (X can be any digit)
+  
+- **Capture Number**: 5-digit sequential number (00001, 00002, etc.)
+
+- **Test Marker**: Optional `T-` after capture number indicates test capture
+
+- **Project Name**: Unique project identifier (e.g., `Arh2k_mezen_200725`)
+
+- **Sensor Code**: Two-part code in format `XX-YY` (e.g., `00-00`, `06-00`, `01-02`)
+
+- **Session GUID**: Unique identifier for the capture session
+
+**XML files:**
+- **EAD Prefix**: Metadata file identifier
+- **Capture Number**: Matches corresponding RAW files
+- **Project Name**: Matches corresponding RAW files
+- **Session GUID**: Matches corresponding RAW files
+
+### Capture Completion
+
+A capture is considered **complete** based on type:
+
+**Normal (non-test) captures:** 14 files required
+- **13 RAW files** - One from each worker node (WU01-WU13)
+- **1 XML file** - Metadata from control unit (CU)
+
+**Test captures:** 13 files required
+- **13 RAW files** - One from each worker node (WU01-WU13)
+- **XML file may be missing** - Test captures might not have metadata
+
+The system tracks each capture by number and marks it complete only when all required components are present.
 
 ## Development
 

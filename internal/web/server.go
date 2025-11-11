@@ -46,12 +46,12 @@ func getWebRoot() string {
 	if _, err := os.Stat("web"); err == nil {
 		return "web"
 	}
-	
+
 	// Try installed location
 	if _, err := os.Stat("/opt/ucxsync/web"); err == nil {
 		return "/opt/ucxsync/web"
 	}
-	
+
 	// Try executable directory
 	if exePath, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exePath)
@@ -60,7 +60,7 @@ func getWebRoot() string {
 			return webPath
 		}
 	}
-	
+
 	// Default to current directory
 	return "web"
 }
@@ -414,9 +414,9 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 		isDefault := false
 
 		// USB devices (typically /dev/sd* mounted on /media or /mnt)
-		if strings.HasPrefix(device, "/dev/sd") && 
-		   (strings.HasPrefix(mountPoint, "/media/") || 
-		    strings.HasPrefix(mountPoint, "/mnt/") && !strings.HasPrefix(mountPoint, "/mnt/ucx")) {
+		if strings.HasPrefix(device, "/dev/sd") &&
+			(strings.HasPrefix(mountPoint, "/media/") ||
+				strings.HasPrefix(mountPoint, "/mnt/") && !strings.HasPrefix(mountPoint, "/mnt/ucx")) {
 			destType = "usb"
 			label = fmt.Sprintf("USB: %s", filepath.Base(mountPoint))
 		} else if fsType == "ext4" || fsType == "xfs" || fsType == "btrfs" {
