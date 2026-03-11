@@ -566,6 +566,17 @@ func (s *Server) handleMountDevice(w http.ResponseWriter, r *http.Request) {
 // getBlockDevices returns list of all block devices using lsblk
 func (s *Server) getBlockDevices() ([]models.BlockDeviceInfo, error) {
 	var devices []models.BlockDeviceInfo
+	type lsblkDevice struct {
+		Name       string        `json:"name"`
+		Size       string        `json:"size"`
+		FSType     string        `json:"fstype"`
+		Label      string        `json:"label"`
+		MountPoint string        `json:"mountpoint"`
+		Type       string        `json:"type"`
+		RM         interface{}   `json:"rm"`
+		Model      string        `json:"model"`
+		Children   []lsblkDevice `json:"children"`
+	}
 
 	// Use lsblk to get block device information
 	cmd := exec.Command("lsblk", "-J", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,TYPE,RM,MODEL")
@@ -575,92 +586,96 @@ func (s *Server) getBlockDevices() ([]models.BlockDeviceInfo, error) {
 	}
 
 	var lsblkOutput struct {
-		BlockDevices []struct {
-			Name       string      `json:"name"`
-			Size       string      `json:"size"`
-			FSType     string      `json:"fstype"`
-			Label      string      `json:"label"`
-			MountPoint string      `json:"mountpoint"`
-			Type       string      `json:"type"`
-			RM         interface{} `json:"rm"` // can be bool or string depending on lsblk
-			Model      string      `json:"model"`
-		} `json:"blockdevices"`
+		BlockDevices []lsblkDevice `json:"blockdevices"`
 	}
 
 	if err := json.Unmarshal(output, &lsblkOutput); err != nil {
 		return nil, fmt.Errorf("failed to parse lsblk output: %w", err)
 	}
 
-	for _, dev := range lsblkOutput.BlockDevices {
-		// Skip if no filesystem
-		if dev.FSType == "" {
-			continue
-		}
-
-		// Skip if device type is not "part" (partition)
-		if dev.Type != "part" {
-			continue
-		}
-
-		// Skip system partitions (mounted on /, /boot, /home, etc.)
-		if dev.MountPoint == "/" ||
-			strings.HasPrefix(dev.MountPoint, "/boot") ||
-			strings.HasPrefix(dev.MountPoint, "/home") ||
-			strings.HasPrefix(dev.MountPoint, "/var") ||
-			strings.HasPrefix(dev.MountPoint, "/snap") {
-			continue
-		}
-
-		// Skip UCX network mounts
-		if strings.HasPrefix(dev.MountPoint, defaultNetworkMountRoot) {
-			continue
-		}
-
-		devicePath := "/dev/" + dev.Name
-		// rm may be boolean or string depending on lsblk version/platform
-		isRemovable := false
-		switch v := dev.RM.(type) {
+	parseRemovable := func(raw interface{}) bool {
+		switch v := raw.(type) {
 		case bool:
-			isRemovable = v
+			return v
 		case string:
-			isRemovable = (v == "1" || strings.EqualFold(v, "true"))
+			return v == "1" || strings.EqualFold(v, "true")
 		case float64:
-			isRemovable = v != 0
+			return v != 0
 		default:
-			isRemovable = false
+			return false
 		}
-		isMounted := dev.MountPoint != ""
-
-		// Get size in bytes for sorting
-		sizeBytes := parseSizeToBytes(dev.Size)
-
-		label := dev.Label
-		if label == "" {
-			if isRemovable {
-				label = fmt.Sprintf("Removable: %s", dev.Name)
-			} else {
-				label = fmt.Sprintf("Disk: %s", dev.Name)
-			}
-		}
-
-		// Add model info if available
-		if dev.Model != "" {
-			label = fmt.Sprintf("%s (%s)", label, strings.TrimSpace(dev.Model))
-		}
-
-		devices = append(devices, models.BlockDeviceInfo{
-			DevicePath:  devicePath,
-			DeviceName:  dev.Name,
-			Label:       label,
-			Size:        dev.Size,
-			SizeBytes:   sizeBytes,
-			FSType:      dev.FSType,
-			MountPoint:  dev.MountPoint,
-			IsMounted:   isMounted,
-			IsRemovable: isRemovable,
-			Model:       strings.TrimSpace(dev.Model),
-		})
 	}
+
+	var walkDevices func([]lsblkDevice)
+	walkDevices = func(entries []lsblkDevice) {
+		for _, dev := range entries {
+		// Skip if no filesystem
+			if dev.FSType == "" {
+				walkDevices(dev.Children)
+				continue
+			}
+
+			// Allow partitions and whole-disk filesystems.
+			if dev.Type != "part" && dev.Type != "disk" {
+				walkDevices(dev.Children)
+				continue
+			}
+
+			// Skip system partitions (mounted on /, /boot, /home, etc.)
+			if dev.MountPoint == "/" ||
+				strings.HasPrefix(dev.MountPoint, "/boot") ||
+				strings.HasPrefix(dev.MountPoint, "/home") ||
+				strings.HasPrefix(dev.MountPoint, "/var") ||
+				strings.HasPrefix(dev.MountPoint, "/snap") {
+				walkDevices(dev.Children)
+				continue
+			}
+
+			// Skip UCX network mounts
+			if strings.HasPrefix(dev.MountPoint, defaultNetworkMountRoot) {
+				walkDevices(dev.Children)
+				continue
+			}
+
+			devicePath := "/dev/" + dev.Name
+			isRemovable := parseRemovable(dev.RM)
+			isMounted := dev.MountPoint != ""
+
+			// Get size in bytes for sorting
+			sizeBytes := parseSizeToBytes(dev.Size)
+
+			label := dev.Label
+			if label == "" {
+				if isRemovable {
+					label = fmt.Sprintf("Removable: %s", dev.Name)
+				} else {
+					label = fmt.Sprintf("Disk: %s", dev.Name)
+				}
+			}
+
+			// Add model info if available
+			if dev.Model != "" {
+				label = fmt.Sprintf("%s (%s)", label, strings.TrimSpace(dev.Model))
+			}
+
+			devices = append(devices, models.BlockDeviceInfo{
+				DevicePath:  devicePath,
+				DeviceName:  dev.Name,
+				Label:       label,
+				Size:        dev.Size,
+				SizeBytes:   sizeBytes,
+				FSType:      dev.FSType,
+				MountPoint:  dev.MountPoint,
+				IsMounted:   isMounted,
+				IsRemovable: isRemovable,
+				Model:       strings.TrimSpace(dev.Model),
+			})
+
+			walkDevices(dev.Children)
+		}
+	}
+
+	walkDevices(lsblkOutput.BlockDevices)
 
 	// Sort: removable first, then by size (largest first)
 	sort.Slice(devices, func(i, j int) bool {
