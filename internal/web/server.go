@@ -417,7 +417,7 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 
 		// Skip system mounts - we only want external storage
 		// Skip: /, /boot, /home, /var, /tmp, /snap, etc.
-		if mountPoint == "/" || 
+		if mountPoint == "/" ||
 			strings.HasPrefix(mountPoint, "/boot") ||
 			strings.HasPrefix(mountPoint, "/home") ||
 			strings.HasPrefix(mountPoint, "/var") ||
@@ -443,7 +443,7 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 		// USB/external storage devices
 		if strings.HasPrefix(device, "/dev/sd") || strings.HasPrefix(device, "/dev/nvme") {
 			destType = "usb"
-			
+
 			// Check if it's /mnt/storage (our default USB-SSD mount)
 			if mountPoint == "/mnt/storage" {
 				label = "USB-SSD Storage (default)"
@@ -775,4 +775,3 @@ func parseSizeToBytes(size string) uint64 {
 
 	return uint64(value * float64(multiplier))
 }
-

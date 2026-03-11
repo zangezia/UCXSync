@@ -75,16 +75,16 @@ type DestinationInfo struct {
 
 // BlockDeviceInfo holds information about a block device
 type BlockDeviceInfo struct {
-	DevicePath  string  `json:"device_path"`  // e.g., /dev/sdb1
-	DeviceName  string  `json:"device_name"`  // e.g., sdb1
-	Label       string  `json:"label"`        // Filesystem label
-	Size        string  `json:"size"`         // Human readable size
-	SizeBytes   uint64  `json:"size_bytes"`   // Size in bytes
-	FSType      string  `json:"fstype"`       // Filesystem type (ext4, exfat, ntfs, etc)
-	MountPoint  string  `json:"mount_point"`  // Where mounted, empty if not mounted
-	IsMounted   bool    `json:"is_mounted"`   // Mount status
-	IsRemovable bool    `json:"is_removable"` // USB/removable device
-	Model       string  `json:"model"`        // Device model name
+	DevicePath  string `json:"device_path"`  // e.g., /dev/sdb1
+	DeviceName  string `json:"device_name"`  // e.g., sdb1
+	Label       string `json:"label"`        // Filesystem label
+	Size        string `json:"size"`         // Human readable size
+	SizeBytes   uint64 `json:"size_bytes"`   // Size in bytes
+	FSType      string `json:"fstype"`       // Filesystem type (ext4, exfat, ntfs, etc)
+	MountPoint  string `json:"mount_point"`  // Where mounted, empty if not mounted
+	IsMounted   bool   `json:"is_mounted"`   // Mount status
+	IsRemovable bool   `json:"is_removable"` // USB/removable device
+	Model       string `json:"model"`        // Device model name
 }
 
 // MountRequest represents a mount/unmount request
