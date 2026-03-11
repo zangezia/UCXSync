@@ -576,14 +576,14 @@ func (s *Server) getBlockDevices() ([]models.BlockDeviceInfo, error) {
 
 	var lsblkOutput struct {
 		BlockDevices []struct {
-			Name       string `json:"name"`
-			Size       string `json:"size"`
-			FSType     string `json:"fstype"`
-			Label      string `json:"label"`
-			MountPoint string `json:"mountpoint"`
-			Type       string `json:"type"`
-			RM         string `json:"rm"` // Removable: "0" or "1"
-			Model      string `json:"model"`
+			Name       string      `json:"name"`
+			Size       string      `json:"size"`
+			FSType     string      `json:"fstype"`
+			Label      string      `json:"label"`
+			MountPoint string      `json:"mountpoint"`
+			Type       string      `json:"type"`
+			RM         interface{} `json:"rm"` // can be bool or string depending on lsblk
+			Model      string      `json:"model"`
 		} `json:"blockdevices"`
 	}
 
@@ -617,7 +617,18 @@ func (s *Server) getBlockDevices() ([]models.BlockDeviceInfo, error) {
 		}
 
 		devicePath := "/dev/" + dev.Name
-		isRemovable := dev.RM == "1"
+		// rm may be boolean or string depending on lsblk version/platform
+		isRemovable := false
+		switch v := dev.RM.(type) {
+		case bool:
+			isRemovable = v
+		case string:
+			isRemovable = (v == "1" || strings.EqualFold(v, "true"))
+		case float64:
+			isRemovable = v != 0
+		default:
+			isRemovable = false
+		}
 		isMounted := dev.MountPoint != ""
 
 		// Get size in bytes for sorting
