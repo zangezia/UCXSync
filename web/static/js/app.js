@@ -21,6 +21,8 @@ class UCXSyncApp {
         this.stopBtn = document.getElementById('stop-btn');
         this.refreshBtn = document.getElementById('refresh-projects');
         this.manageDevicesBtn = document.getElementById('manage-devices-btn');
+        this.mountSharesBtn = document.getElementById('mount-shares-btn');
+        this.restartServiceBtn = document.getElementById('restart-service-btn');
 
         // Status
         this.completedCapturesEl = document.getElementById('completed-captures');
@@ -62,6 +64,8 @@ class UCXSyncApp {
             this.loadDestinations();
         });
         this.manageDevicesBtn.addEventListener('click', () => this.openDeviceModal());
+        this.mountSharesBtn.addEventListener('click', () => this.mountShares());
+        this.restartServiceBtn.addEventListener('click', () => this.restartService());
 
         // Auto-save settings
         this.projectSelect.addEventListener('change', () => this.saveSettings());
@@ -249,8 +253,49 @@ class UCXSyncApp {
         this.startBtn.disabled = this.isRunning;
         this.stopBtn.disabled = !this.isRunning;
         this.projectSelect.disabled = this.isRunning;
-        this.destinationInput.disabled = this.isRunning;
+        this.destinationSelect.disabled = this.isRunning;
+        this.destinationCustom.disabled = this.isRunning;
         this.parallelismInput.disabled = this.isRunning;
+    }
+
+    async mountShares() {
+        this.mountSharesBtn.disabled = true;
+
+        try {
+            const response = await fetch('/api/shares/mount', { method: 'POST' });
+            if (!response.ok) {
+                const error = await response.text();
+                throw new Error(error);
+            }
+
+            this.log('✓ Повторная попытка монтирования шар выполнена', 'success');
+            await this.loadProjects();
+        } catch (error) {
+            this.log(`✗ Ошибка монтирования шар: ${error.message}`, 'error');
+        } finally {
+            this.mountSharesBtn.disabled = false;
+        }
+    }
+
+    async restartService() {
+        if (!window.confirm('Перезапустить службу UCXSync? Соединение с веб-интерфейсом будет временно разорвано.')) {
+            return;
+        }
+
+        this.restartServiceBtn.disabled = true;
+
+        try {
+            const response = await fetch('/api/service/restart', { method: 'POST' });
+            if (!response.ok) {
+                const error = await response.text();
+                throw new Error(error);
+            }
+
+            this.log('↻ Команда на перезапуск службы отправлена', 'info');
+        } catch (error) {
+            this.log(`✗ Ошибка перезапуска службы: ${error.message}`, 'error');
+            this.restartServiceBtn.disabled = false;
+        }
     }
 
     updateStatus(status) {
@@ -440,7 +485,7 @@ class UCXSyncApp {
                 throw new Error(error);
             }
 
-            this.log(`✓ Устройство ${devicePath} смонтировано в /mnt/storage`, 'success');
+            this.log(`✓ Устройство ${devicePath} смонтировано в /ucdata`, 'success');
             
             // Reload devices and destinations
             await this.loadDevices();

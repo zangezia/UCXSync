@@ -131,6 +131,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/destinations", s.handleGetDestinations)
 	mux.HandleFunc("/api/devices", s.handleGetDevices)
 	mux.HandleFunc("/api/devices/mount", s.handleMountDevice)
+	mux.HandleFunc("/api/shares/mount", s.handleMountShares)
+	mux.HandleFunc("/api/service/restart", s.handleRestartService)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
 	mux.HandleFunc("/api/sync/start", s.handleStartSync)
 	mux.HandleFunc("/api/sync/stop", s.handleStopSync)
@@ -528,6 +530,21 @@ func (s *Server) handleMountDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Action == "unmount" {
+		status := s.syncService.GetStatus()
+		if status.IsRunning && isManagedDataDestination(status.Destination) {
+			s.syncService.Stop()
+			s.broadcast(models.WSMessage{
+				Type: "log",
+				Payload: models.LogMessage{
+					Timestamp: time.Now(),
+					Level:     "warn",
+					Message:   "Синхронизация остановлена перед размонтированием диска назначения",
+				},
+			})
+		}
+	}
+
 	var err error
 	switch req.Action {
 	case "mount":
@@ -561,6 +578,63 @@ func (s *Server) handleMountDevice(w http.ResponseWriter, r *http.Request) {
 		"action": req.Action,
 		"device": req.DevicePath,
 	})
+}
+
+func (s *Server) handleMountShares(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := network.CheckRequirements(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.netService.MountAll(); err != nil {
+		log.Error().Err(err).Msg("Failed to mount network shares on demand")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcast(models.WSMessage{
+		Type: "log",
+		Payload: models.LogMessage{
+			Timestamp: time.Now(),
+			Level:     "info",
+			Message:   "Повторная попытка монтирования шар выполнена",
+		},
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "mounted"})
+}
+
+func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cmd := exec.Command("sh", "-c", "sleep 1; systemctl restart ucxsync")
+	if err := cmd.Start(); err != nil {
+		log.Error().Err(err).Msg("Failed to schedule service restart")
+		http.Error(w, fmt.Sprintf("failed to restart service: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcast(models.WSMessage{
+		Type: "log",
+		Payload: models.LogMessage{
+			Timestamp: time.Now(),
+			Level:     "warn",
+			Message:   "Запрошен перезапуск службы UCXSync",
+		},
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
 }
 
 // getBlockDevices returns list of all block devices using lsblk
@@ -609,7 +683,7 @@ func (s *Server) getBlockDevices() ([]models.BlockDeviceInfo, error) {
 	var walkDevices func([]lsblkDevice)
 	walkDevices = func(entries []lsblkDevice) {
 		for _, dev := range entries {
-		// Skip if no filesystem
+			// Skip if no filesystem
 			if dev.FSType == "" {
 				walkDevices(dev.Children)
 				continue
@@ -805,4 +879,9 @@ func parseSizeToBytes(size string) uint64 {
 	fmt.Sscanf(size, "%f", &value)
 
 	return uint64(value * float64(multiplier))
+}
+
+func isManagedDataDestination(destination string) bool {
+	clean := filepath.ToSlash(filepath.Clean(destination))
+	return clean == defaultDataMountPoint || strings.HasPrefix(clean, defaultDataMountPoint+"/")
 }

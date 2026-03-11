@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -101,7 +102,12 @@ var (
 	// .xml - file extension
 	// Note: XML file may be missing for test captures
 	metadataRegex = regexp.MustCompile(`^EAD-(\d+)-([^-]+)-([A-F0-9_]+)\.xml$`)
+
+	// RawQv quality file (optional supplemental file per capture)
+	rawQvRegex = regexp.MustCompile(`^RawQv-(\d+)-([^-]+)-([A-F0-9_]+)\.dat$`)
 )
+
+const defaultDataMountPoint = "/ucdata"
 
 // New creates a new sync service
 func New(nodes, shares []string, baseMountDir string) *Service {
@@ -134,6 +140,12 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
+
+	if err := ensureDestinationReady(destination); err != nil {
+		s.isRunning = false
+		s.cancel = nil
+		return err
+	}
 
 	// Create destination directory
 	destDir := filepath.Join(destination, project)
@@ -303,6 +315,11 @@ func (s *Service) syncLoop(ctx context.Context, destDir string) {
 }
 
 func (s *Service) syncIteration(ctx context.Context, destDir string) {
+	if err := ensureDestinationReady(destDir); err != nil {
+		log.Error().Err(err).Str("destination", destDir).Msg("Destination unavailable, skipping sync iteration")
+		return
+	}
+
 	for _, node := range s.nodes {
 		for _, share := range s.shares {
 			select {
@@ -497,6 +514,10 @@ func (s *Service) shouldCopyFile(sourcePath, sourceRoot, destRoot string) bool {
 }
 
 func (s *Service) copyFile(ctx context.Context, task *taskInfo, sourcePath, sourceRoot, destRoot string) error {
+	if err := ensureDestinationReady(destRoot); err != nil {
+		return err
+	}
+
 	relPath, err := filepath.Rel(sourceRoot, sourcePath)
 	if err != nil {
 		return err
@@ -553,7 +574,10 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		// Try to parse as XML metadata file
 		info = parseMetadataFileName(filename)
 		if info == nil {
-			return
+			info = parseRawQvFileName(filename)
+			if info == nil {
+				return
+			}
 		}
 	}
 
@@ -580,6 +604,9 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 	} else if fileExt == ".xml" {
 		// XML metadata file - single file from CU node (only for non-test captures)
 		fileKey = "xml:CU"
+	} else if fileExt == ".dat" {
+		// RawQv quality data file - optional supplemental file per capture
+		fileKey = "dat:CU"
 	} else {
 		return // Unknown file type
 	}
@@ -594,11 +621,14 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 	// Count RAW and XML files separately
 	rawCount := 0
 	hasXML := false
+	hasDAT := false
 	for key := range fileMap {
 		if strings.HasPrefix(key, "raw:") {
 			rawCount++
 		} else if key == "xml:CU" {
 			hasXML = true
+		} else if key == "dat:CU" {
+			hasDAT = true
 		}
 	}
 
@@ -606,8 +636,6 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 	// - Normal capture: 13 RAW files + 1 XML file = 14 total
 	// - Test capture: 13 RAW files (XML may be missing)
 	const requiredRAWFiles = 13
-	const requiredTotalFilesNormal = 14
-	const requiredTotalFilesTest = 13
 
 	log.Debug().
 		Str("capture", info.CaptureNumber).
@@ -616,23 +644,23 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		Bool("is_test", info.IsTest).
 		Int("raw_files", rawCount).
 		Bool("has_xml", hasXML).
-		Msgf("Capture progress: %d RAW + %s XML", rawCount, map[bool]string{true: "1", false: "0"}[hasXML])
+		Bool("has_dat", hasDAT).
+		Msgf("Capture progress: %s", formatCaptureSummary(rawCount, hasXML, hasDAT))
 
 	// Check if capture is complete
 	isComplete := false
-	totalFiles := 0
 
 	if info.IsTest {
 		// Test captures: require only 13 RAW files (XML is optional/missing)
 		isComplete = rawCount == requiredRAWFiles
-		totalFiles = requiredTotalFilesTest
 	} else {
 		// Normal captures: require 13 RAW + 1 XML
 		isComplete = rawCount == requiredRAWFiles && hasXML
-		totalFiles = requiredTotalFilesNormal
 	}
 
 	if isComplete {
+		summary := formatCaptureSummary(rawCount, hasXML, hasDAT)
+
 		if info.IsTest {
 			atomic.AddInt32(&s.completedTestCaptures, 1)
 			s.lastTestCaptureNumber = info.CaptureNumber
@@ -644,7 +672,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 				Str("sensor", info.SensorCode).
 				Str("session", info.SessionID).
 				Int("test_count", int(atomic.LoadInt32(&s.completedTestCaptures))).
-				Msgf("✓ TEST capture completed (%d RAW files, XML not required)", totalFiles)
+				Msgf("✓ TEST capture completed (%s)", summary)
 		} else {
 			atomic.AddInt32(&s.completedCaptures, 1)
 			s.lastCaptureNumber = info.CaptureNumber
@@ -656,7 +684,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 				Str("sensor", info.SensorCode).
 				Str("session", info.SessionID).
 				Int("total_count", int(atomic.LoadInt32(&s.completedCaptures))).
-				Msgf("✓ Capture completed (13 RAW + 1 XML = %d files)", totalFiles)
+				Msgf("✓ Capture completed (%s)", summary)
 		}
 
 		delete(s.captureTracker, info.CaptureNumber)
@@ -714,6 +742,79 @@ func parseMetadataFileName(filename string) *models.CaptureInfo {
 		SessionID:     sessionID,
 		IsVerified:    true,
 	}
+}
+
+func parseRawQvFileName(filename string) *models.CaptureInfo {
+	matches := rawQvRegex.FindStringSubmatch(filename)
+	if len(matches) != 4 {
+		return nil
+	}
+
+	return &models.CaptureInfo{
+		DataType:      "RawQv",
+		CaptureNumber: matches[1],
+		IsTest:        false,
+		ProjectName:   matches[2],
+		SensorCode:    "",
+		SessionID:     matches[3],
+		IsVerified:    true,
+	}
+}
+
+func formatCaptureSummary(rawCount int, hasXML, hasDAT bool) string {
+	parts := []string{fmt.Sprintf("%d RAW", rawCount)}
+	totalFiles := rawCount
+
+	if hasXML {
+		parts = append(parts, "1 XML")
+		totalFiles++
+	}
+
+	if hasDAT {
+		parts = append(parts, "1 RawQv")
+		totalFiles++
+	}
+
+	return fmt.Sprintf("%s = %d files", strings.Join(parts, " + "), totalFiles)
+}
+
+func ensureDestinationReady(destination string) error {
+	if !requiresMountedDestination(destination) {
+		return nil
+	}
+
+	mounted, err := isMountPointMounted(defaultDataMountPoint)
+	if err != nil {
+		return fmt.Errorf("failed to check destination mount %s: %w", defaultDataMountPoint, err)
+	}
+
+	if !mounted {
+		return fmt.Errorf("destination %s is unavailable: %s is not mounted", destination, defaultDataMountPoint)
+	}
+
+	return nil
+}
+
+func requiresMountedDestination(destination string) bool {
+	clean := filepath.ToSlash(pathpkg.Clean(destination))
+	return clean == defaultDataMountPoint || strings.HasPrefix(clean, defaultDataMountPoint+"/")
+}
+
+func isMountPointMounted(mountPoint string) (bool, error) {
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return false, err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == mountPoint {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func isValidProjectName(name string) bool {
