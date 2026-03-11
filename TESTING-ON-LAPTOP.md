@@ -31,8 +31,8 @@ sudo rm -f /etc/systemd/system/ucxsync.service
 sudo systemctl daemon-reload
 
 # Опционально: удалить данные (если нужно начать с чистого листа)
-# sudo rm -rf /mnt/storage/ucx/*
-# sudo rm -rf /mnt/ucx/*
+# sudo rm -rf /ucdata/ucx/*
+# sudo rm -rf /ucmount/*
 ```
 
 Теперь можно устанавливать новую версию:
@@ -59,7 +59,7 @@ chmod +x QUICK-TEST.sh
 - ✅ Соберёт приложение
 - ✅ Установит в `/usr/local/bin/ucxsync`
 - ✅ Создаст конфиг в `/etc/ucxsync/config.yaml`
-- ✅ Создаст директории `/mnt/storage/ucx` и `/mnt/ucx`
+- ✅ Создаст директории `/ucdata/ucx` и `/ucmount`
 - ✅ Установит systemd сервис
 
 ### Вариант 2: Ручная установка (если хочешь контроль)
@@ -79,9 +79,9 @@ sudo cp config.example.yaml /etc/ucxsync/config.yaml
 sudo nano /etc/ucxsync/config.yaml  # ← РЕДАКТИРУЕМ!
 
 # 4. Создаём директории
-sudo mkdir -p /mnt/storage/ucx
-sudo mkdir -p /mnt/ucx
-sudo chown $USER:$USER /mnt/storage/ucx
+sudo mkdir -p /ucdata/ucx
+sudo mkdir -p /ucmount
+sudo chown $USER:$USER /ucdata/ucx
 ```
 
 ---
@@ -100,7 +100,7 @@ sudo nano /etc/ucxsync/config.yaml
 # 1. Параллелизм (для AMD64 ноутбука)
 sync:
   project: "Arh2k_mezen_200725"    # Название проекта
-  destination: "/mnt/storage/ucx"   # USB-SSD диск!
+  destination: "/ucdata/ucx"   # USB-SSD диск!
   max_parallelism: 6                # 4-8 для ноутбука
   min_free_disk_space: 52428800     # 50 MB
 
@@ -125,7 +125,7 @@ credentials:
 ```
 
 **Важно:** 
-- `/mnt/storage/ucx` - это путь на USB-SSD диске!
+- `/ucdata/ucx` - это путь на USB-SSD диске!
 - Узлы WU01-WU13, CU должны быть доступны по сети
 - См. `STORAGE-ARCHITECTURE.md` для деталей
 
@@ -230,7 +230,7 @@ sudo iftop -i eth0  # замени eth0 на свой интерфейс (ip a)
 
 ### Терминал 5: Использование диска
 ```bash
-watch -n 1 'df -h | grep "/mnt/storage"'
+watch -n 1 'df -h | grep "/ucdata"'
 ```
 
 ---
@@ -268,7 +268,7 @@ watch -n 1 'df -h | grep "/mnt/storage"'
 - [ ] Неправильный пароль
 - [ ] Недостаточно места на диске
 - [ ] Порт 8080 уже занят
-- [ ] Нет прав на запись в /mnt/storage/ucx
+- [ ] Нет прав на запись в /ucdata/ucx
 
 ---
 
@@ -301,12 +301,12 @@ sudo nano /etc/ucxsync/config.yaml
 # Измени: web.port: 8081
 ```
 
-### Проблема: "permission denied" на /mnt/storage/ucx
+### Проблема: "permission denied" на /ucdata/ucx
 
 **Решение:**
 ```bash
-sudo chown -R $USER:$USER /mnt/storage/ucx
-sudo chmod -R 755 /mnt/storage/ucx
+sudo chown -R $USER:$USER /ucdata/ucx
+sudo chmod -R 755 /ucdata/ucx
 ```
 
 ### Проблема: "out of memory"
@@ -345,10 +345,10 @@ sudo journalctl -u ucxsync --since "1 hour ago"
 ### 3. Проверь файлы на диске
 ```bash
 # Список синхронизированных файлов
-ls -lah /mnt/storage/ucx/ucx01/share1/
+ls -lah /ucdata/ucx/ucx01/share1/
 
 # Размер
-du -sh /mnt/storage/ucx/*
+du -sh /ucdata/ucx/*
 ```
 
 ### 4. Если всё OK - сообщи результат!

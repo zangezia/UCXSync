@@ -30,8 +30,8 @@ echo -e "${GREEN}✓${NC} Service stopped"
 # Unmount shares
 echo ""
 echo "Unmounting network shares..."
-if [ -d /mnt/ucx ]; then
-    for mount in $(mount | grep "/mnt/ucx" | cut -d' ' -f3 2>/dev/null); do
+if [ -d /ucmount ]; then
+    for mount in $(mount | grep "/ucmount" | cut -d' ' -f3 2>/dev/null); do
         umount "$mount" 2>/dev/null || true
     done
 fi
@@ -68,31 +68,32 @@ fi
 
 # Ask about mount points
 echo ""
-read -p "Remove mount directory /mnt/ucx? [y/N] " -n 1 -r
+read -p "Remove mount directory /ucmount? [y/N] " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    rm -rf /mnt/ucx
+    rm -rf /ucmount
     echo -e "${GREEN}✓${NC} Mount directory removed"
 else
-    echo -e "${YELLOW}⚠${NC}  Mount directory preserved at /mnt/ucx"
+    echo -e "${YELLOW}⚠${NC}  Mount directory preserved at /ucmount"
 fi
 
 # Ask about data directory
 echo ""
-read -p "Remove data directory /mnt/storage/ucx? [y/N] " -n 1 -r
+read -p "Remove data directory /ucdata or /ucdata/ucx? [y/N] " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${RED}⚠ WARNING: This will delete all synchronized data!${NC}"
     read -p "Are you absolutely sure? [y/N] " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf /mnt/storage/ucx
+        rm -rf /ucdata/ucx
+        rm -rf /ucdata
         echo -e "${GREEN}✓${NC} Data directory removed"
     else
-        echo -e "${YELLOW}⚠${NC}  Data directory preserved at /mnt/storage/ucx"
+        echo -e "${YELLOW}⚠${NC}  Data directory preserved at /ucdata"
     fi
 else
-    echo -e "${YELLOW}⚠${NC}  Data directory preserved at /mnt/storage/ucx"
+    echo -e "${YELLOW}⚠${NC}  Data directory preserved at /ucdata"
 fi
 
 # Ask about dependencies

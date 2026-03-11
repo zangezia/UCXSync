@@ -14,8 +14,8 @@ sudo rm -f /etc/systemd/system/ucxsync.service
 sudo systemctl daemon-reload
 
 # Опционально: очистить старые данные
-# sudo rm -rf /mnt/storage/ucx/*
-# sudo rm -rf /mnt/ucx/*
+# sudo rm -rf /ucdata/ucx/*
+# sudo rm -rf /ucmount/*
 ```
 
 ### 1. Клонирование репозитория
@@ -56,7 +56,7 @@ sync:
   max_parallelism: 8  # Для AMD64: 6-12, для RISC-V: 2-4
   
 destinations:
-  - path: "/mnt/storage/ucx"  # Путь должен существовать!
+  - path: "/ucdata/ucx"  # Путь должен существовать!
     min_free_gb: 500
 
 nodes:
@@ -71,11 +71,11 @@ nodes:
 
 ```bash
 # Создаем директорию для хранения данных
-sudo mkdir -p /mnt/storage/ucx
-sudo chown $USER:$USER /mnt/storage/ucx
+sudo mkdir -p /ucdata/ucx
+sudo chown $USER:$USER /ucdata/ucx
 
 # Создаем точки монтирования
-sudo mkdir -p /mnt/ucx
+sudo mkdir -p /ucmount
 ```
 
 ### 5. Тестовый запуск (БЕЗ systemd)
@@ -159,7 +159,7 @@ watch -n 1 df -h
 
 ### Старт задачи синхронизации:
 ```
-[14:23:45] Mounting ucx01://share1 to /mnt/ucx/ucx01_share1
+[14:23:45] Mounting ucx01://share1 to /ucmount/ucx01_share1
 [14:23:46] Connected successfully
 [14:23:46] Scanning files...
 [14:23:50] Found 15234 files (42.3 GB)
@@ -196,10 +196,10 @@ web:
 
 ```bash
 # Проверьте права на директорию
-ls -la /mnt/storage/
+ls -la /ucdata/
 
 # Исправьте владельца
-sudo chown -R $USER:$USER /mnt/storage/ucx
+sudo chown -R $USER:$USER /ucdata/ucx
 ```
 
 ### 4. Out of Memory при большом max_parallelism

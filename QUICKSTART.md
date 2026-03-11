@@ -53,9 +53,9 @@ Expected output:
 sudo ucxsync mount
 ```
 
-This mounts all configured shares to `/mnt/ucx/`:
-- `/mnt/ucx/WU01/E/`
-- `/mnt/ucx/WU01/F/`
+This mounts all configured shares to `/ucmount/`:
+- `/ucmount/WU01/E/`
+- `/ucmount/WU01/F/`
 - etc.
 
 ### 3. Start Server
@@ -155,13 +155,13 @@ Check the **Журнал событий** (Event Log) panel in the web interface
 ### Check Mounted Shares
 
 ```bash
-mount | grep /mnt/ucx
+mount | grep /ucmount
 ```
 
 Or:
 
 ```bash
-ls -la /mnt/ucx/WU01/E/
+ls -la /ucmount/WU01/E/
 ```
 
 ### Change Parallelism

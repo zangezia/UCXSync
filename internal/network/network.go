@@ -30,7 +30,7 @@ func New(nodes, shares []string, username, password string) *Service {
 		shares:       shares,
 		username:     username,
 		password:     password,
-		baseMountDir: "/mnt/ucx",
+		baseMountDir: "/ucmount",
 		mounted:      make(map[string]bool),
 	}
 }

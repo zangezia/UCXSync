@@ -1,318 +1,105 @@
-# 📁 Архитектура хранения данных UCXSync
+# 📁 Storage Architecture
 
-## Две директории - два назначения
+UCXSync uses two separate Linux paths with different roles.
 
-UCXSync использует **ДВЕ разные директории** с разным назначением:
+## `/ucmount` — temporary network mounts
 
----
+This path is used for CIFS/SMB mounts from UCX nodes.
 
-## 1️⃣ `/mnt/ucx` - Точки монтирования UCX узлов (ВРЕМЕННЫЕ)
+Typical structure:
 
-### Назначение
-Здесь монтируются CIFS/SMB сетевые шары от удалённых UCX узлов (камер).
-
-### Структура
-```
-/mnt/ucx/
-├── WU01_E$/     ← \\192.168.1.101\E$ (сетевой диск)
-├── WU01_F$/     ← \\192.168.1.101\F$
-├── WU02_E$/     ← \\192.168.1.102\E$
-├── WU02_F$/
-├── ...
-├── WU13_F$/
-└── CU_F$/       ← \\192.168.1.114\F$ (метаданные XML)
-```
-
-### Характеристики
-- ✅ **Сетевые диски** - файлы физически находятся на UCX узлах
-- ✅ **Автоматическое монтирование** - при старте синхронизации
-- ✅ **Временные** - размонтируются после завершения
-- ✅ **Требуют сеть** - если сеть отвалится, данные недоступны
-- ✅ **Не занимают место** - это просто точки монтирования
-
-### Создание
-```bash
-sudo mkdir -p /mnt/ucx
-# UCXSync автоматически создаёт подпапки при монтировании
-```
-
----
-
-## 2️⃣ `/mnt/storage` - Внешний USB-SSD диск (ПОСТОЯННОЕ)
-
-### Назначение
-Здесь хранятся **скопированные файлы** с UCX узлов на внешнем USB-SSD диске.
-
-### Параметр в конфиге
-```yaml
-sync:
-  destination: "/mnt/storage"  # Корень USB-SSD диска
-```
-
-### Структура
-```
-/mnt/storage/               ← корень USB-SSD диска
+```text
+/ucmount/
 ├── WU01/
-│   ├── E$/
-│   │   └── Arh2k_mezen_200725/
-│   │       ├── Lvl00-00001-Arh2k_mezen_200725-06-00-UUID.raw
-│   │       ├── Lvl00-00002-Arh2k_mezen_200725-06-00-UUID.raw
-│   │       └── ...
-│   └── F$/
+│   ├── E/
+│   └── F/
 ├── WU02/
-│   ├── E$/
-│   └── F$/
-├── ...
-├── WU13/
-│   └── F$/
+│   ├── E/
+│   └── F/
 └── CU/
-    └── F$/
-        └── Arh2k_mezen_200725/
-            ├── EAD-00001-Arh2k_mezen_200725-UUID.xml
-            └── ...
+    ├── E/
+    └── F/
 ```
 
-**Примечание:** Используется весь USB-SSD диск целиком для UCXSync. Если нужно хранить другие данные, создайте подпапку в конфиге: `destination: "/mnt/storage/ucx"`
+Properties:
+- temporary;
+- network-backed;
+- managed by UCXSync;
+- expected to be empty after unmount.
 
-### Характеристики
-- ✅ **Внешний USB-SSD диск** - подключается к ноутбуку/серверу
-- ✅ **Постоянное хранилище** - файлы доступны без сети
-- ✅ **Большой объём** - нужно 500GB - 2TB
-- ✅ **Переносимый** - можно отключить и унести
-- ✅ **Быстрый** - SSD для быстрого копирования
+Manual preparation if needed:
 
-### Подключение USB-SSD
-
-#### Автоматическое монтирование (рекомендуется)
 ```bash
-# 1. Подключите USB-SSD диск
-
-# 2. Найдите устройство
-lsblk
-# Пример вывода:
-# sda      8:0    0   1.8T  0 disk 
-# └─sda1   8:1    0   1.8T  0 part    ← ваш USB-SSD
-
-# 3. Создайте точку монтирования
-sudo mkdir -p /mnt/storage
-
-# 4. Смонтируйте диск
-sudo mount /dev/sda1 /mnt/storage
-
-# 5. Создайте директорию для UCX
-sudo mkdir -p /mnt/storage/ucx
-sudo chown $USER:$USER /mnt/storage/ucx
-
-# 6. Проверьте
-df -h /mnt/storage
+sudo mkdir -p /ucmount
 ```
 
-#### Постоянное монтирование через fstab
-```bash
-# 1. Узнайте UUID диска
-sudo blkid /dev/sda1
-# UUID="12345678-1234-1234-1234-123456789abc"
+## `/ucdata` — mounted USB-SSD destination
 
-# 2. Добавьте в /etc/fstab
-echo "UUID=12345678-1234-1234-1234-123456789abc /mnt/storage ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
+This path is the mount point for the external USB-SSD used as the destination storage.
 
-# 3. Проверьте и смонтируйте
-sudo mount -a
-df -h /mnt/storage
-```
-
----
-
-## 🔄 Как это работает вместе
-
-### Процесс синхронизации:
-
-```
-┌─────────────────┐      ┌──────────────┐      ┌──────────────────┐
-│  UCX Узлы       │      │  Ноутбук     │      │  USB-SSD         │
-│  (в архиве)     │      │              │      │  (переносимый)   │
-└─────────────────┘      └──────────────┘      └──────────────────┘
-        │                        │                       │
-        │  1. Mount CIFS         │                       │
-        │ ──────────────────────>│                       │
-        │    /mnt/ucx/WU01_E$/   │                       │
-        │                        │                       │
-        │  2. Read files         │                       │
-        │<──────────────────────>│                       │
-        │    (через сеть)        │                       │
-        │                        │  3. Copy files        │
-        │                        │──────────────────────>│
-        │                        │   /mnt/storage/ucx/   │
-        │                        │                       │
-        │  4. Unmount            │                       │
-        │<───────────────────────│                       │
-        │    /mnt/ucx/ (пусто)   │                       │
-        │                        │                       │
-        │                        │  Файлы остаются на USB│
-        │                        │         ↓             │
-        │                        │   (можно отключить    │
-        │                        │    и унести)          │
-```
-
-### Детальный процесс:
-
-1. **UCXSync монтирует сетевой диск:**
-   ```
-   \\192.168.1.101\E$ → /mnt/ucx/WU01_E$/
-   ```
-
-2. **Читает файлы через сеть:**
-   ```
-   /mnt/ucx/WU01_E$/Arh2k_mezen_200725/file.raw
-   ```
-
-3. **Копирует на USB-SSD:**
-   ```
-   /mnt/storage/WU01/E$/Arh2k_mezen_200725/file.raw
-   ```
-
-4. **Размонтирует сетевой диск:**
-   ```
-   /mnt/ucx/WU01_E$/ (пусто, освобождено)
-   ```
-
-5. **Файлы остаются на USB-SSD:**
-   ```
-   /mnt/storage/WU01/E$/... (локально на внешнем диске)
-   ```
-
----
-
-## 💾 Требования к дискам
-
-### `/mnt/ucx` - точки монтирования
-```bash
-df -h /mnt/ucx
-# Не требует места - это просто директория для монтирования
-```
-
-### `/mnt/storage` - USB-SSD хранилище
-```bash
-df -h /mnt/storage
-# Требуется: 500 GB - 2 TB
-# Зависит от количества снимков и проектов
-```
-
-### Рекомендуемые USB-SSD диски:
-- **Минимум:** 500 GB (для тестов)
-- **Рекомендуется:** 1 TB (для реальной работы)
-- **Оптимально:** 2 TB (для нескольких проектов)
-- **Скорость:** USB 3.1/3.2 Gen 2 (10 Gbps)
-- **Тип:** NVMe SSD в USB корпусе (для максимальной скорости)
-
----
-
-## ⚙️ Конфигурация
-
-### В `config.yaml` указывается только DESTINATION:
+Config example:
 
 ```yaml
 sync:
-  destination: "/mnt/storage"  # Весь USB-SSD диск для UCXSync
-  max_parallelism: 8
+  destination: "/ucdata"
 ```
 
-**Автоматическое монтирование:**
-Чтобы USB-SSD автоматически монтировался при подключении:
+Typical copied-data layout:
+
+```text
+/ucdata/
+├── WU01/
+│   ├── E/
+│   └── F/
+├── WU02/
+│   ├── E/
+│   └── F/
+└── CU/
+    └── F/
+```
+
+Properties:
+- persistent;
+- local USB/NVMe-backed storage;
+- survives network outages;
+- should have enough free space for project data.
+
+Manual mount example:
+
 ```bash
-sudo ./setup-usb-automount.sh
+sudo mkdir -p /ucdata
+sudo mount /dev/sdX1 /ucdata
+df -h /ucdata
 ```
 
----
+Optional subdirectory layout is still possible:
 
-## 📋 Чек-лист перед синхронизацией
+```yaml
+sync:
+  destination: "/ucdata/ucx"
+```
 
-### 1. Проверьте USB-SSD подключен
+## End-to-end data flow
+
+```text
+UCX node share
+    ↓ CIFS mount
+/ucmount/WU01/E/...
+    ↓ incremental copy
+/ucdata/WU01/E/...
+```
+
+## Quick operational checks
+
 ```bash
-lsblk | grep sd
-df -h /mnt/storage
+mount | grep /ucmount
+mountpoint /ucdata
+df -h /ucdata
 ```
 
-### 2. Проверьте свободное место
-```bash
-df -h /mnt/storage/ucx
-# Должно быть минимум 100 GB свободно
-```
+## Summary
 
-### 3. Проверьте права доступа
-```bash
-ls -ld /mnt/storage
-# Должен быть владелец: ваш пользователь
-```
+- `/ucmount` = temporary UCX network share mounts
+- `/ucdata` = destination storage mounted from USB-SSD
 
-### 4. Проверьте сеть к UCX узлам
-```bash
-ping 192.168.1.101  # WU01
-ping 192.168.1.114  # CU
-```
-
----
-
-## 🔧 Типичные проблемы
-
-### Проблема: "No space left on device"
-
-**Причина:** USB-SSD заполнен
-
-**Решение:**
-```bash
-# Проверить место
-df -h /mnt/storage
-
-# Очистить старые данные
-rm -rf /mnt/storage/ucx/old_project/
-
-# Или подключить другой USB-SSD
-```
-
-### Проблема: USB-SSD не монтируется
-
-**Решение:**
-```bash
-# Проверить что диск виден
-lsblk
-
-# Проверить файловую систему
-sudo fsck /dev/sda1
-
-# Смонтировать вручную
-sudo mount /dev/sda1 /mnt/storage
-```
-
-### Проблема: "Permission denied" при записи
-
-**Решение:**
-```bash
-# Исправить владельца
-sudo chown -R $USER:$USER /mnt/storage
-
-# Исправить права
-sudo chmod -R 755 /mnt/storage
-```
-
----
-
-## 🎯 Преимущества схемы с USB-SSD
-
-1. ✅ **Портативность** - отключил и унёс диск с данными
-2. ✅ **Независимость** - данные доступны без сети
-3. ✅ **Масштабируемость** - нужно больше места? Подключи другой USB-SSD
-4. ✅ **Безопасность** - физическое разделение данных
-5. ✅ **Скорость** - SSD быстрее HDD в 5-10 раз
-6. ✅ **Экономия** - не нужен большой внутренний диск в ноутбуке
-
----
-
-## 📝 Итого
-
-| Директория | Назначение | Тип | Место | Устройство |
-|-----------|------------|-----|-------|------------|
-| `/mnt/ucx` | Точки монтирования UCX узлов | Сетевые диски | 0 MB | Сеть |
-| `/mnt/storage` | Хранилище скопированных файлов | Локальное хранилище | 500GB-2TB | USB-SSD |
-
-**Вывод:** UCXSync копирует файлы с сетевых UCX узлов (`/mnt/ucx`) на внешний USB-SSD (`/mnt/storage`).
+UCXSync copies data from `/ucmount` to `/ucdata`.

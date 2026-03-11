@@ -58,7 +58,7 @@ cd UCXSync
 make build
 
 # 4. Установка
-sudo mkdir -p /opt/ucxsync /etc/ucxsync /var/log/ucxsync /mnt/ucx
+sudo mkdir -p /opt/ucxsync /etc/ucxsync /var/log/ucxsync /ucmount
 sudo cp ucxsync /opt/ucxsync/
 sudo cp -r web /opt/ucxsync/
 sudo cp config.example.yaml /etc/ucxsync/config.yaml
@@ -147,7 +147,7 @@ monitoring:
 iperf3 -c WU01
 
 # Проверка скорости диска
-dd if=/dev/zero of=/mnt/storage/test.dat bs=1M count=1024 oflag=direct
+dd if=/dev/zero of=/ucdata/test.dat bs=1M count=1024 oflag=direct
 
 # Мониторинг I/O
 iostat -x 1

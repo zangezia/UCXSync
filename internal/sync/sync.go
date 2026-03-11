@@ -51,7 +51,7 @@ import (
 type Service struct {
 	nodes        []string
 	shares       []string
-	baseMountDir string // Base directory for mounted shares (e.g., /mnt/ucx)
+	baseMountDir string // Base directory for mounted shares (e.g., /ucmount)
 
 	mu                    sync.RWMutex
 	isRunning             bool
@@ -106,7 +106,7 @@ var (
 // New creates a new sync service
 func New(nodes, shares []string, baseMountDir string) *Service {
 	if baseMountDir == "" {
-		baseMountDir = "/mnt/ucx"
+		baseMountDir = "/ucmount"
 	}
 	return &Service{
 		nodes:          nodes,

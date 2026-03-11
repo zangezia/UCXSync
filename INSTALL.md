@@ -69,7 +69,7 @@ go build -o ucxsync ./cmd/ucxsync
 sudo mkdir -p /opt/ucxsync
 sudo mkdir -p /etc/ucxsync
 sudo mkdir -p /var/log/ucxsync
-sudo mkdir -p /mnt/ucx
+sudo mkdir -p /ucmount
 
 # Install binary
 sudo cp ucxsync /opt/ucxsync/
@@ -125,7 +125,7 @@ logging:
 UCXSync automatically mounts network shares on startup. The mount structure:
 
 ```
-/mnt/ucx/
+/ucmount/
 ├── WU01/
 │   ├── E/  (mounted from //WU01/E)
 │   └── F/  (mounted from //WU01/F)
@@ -236,7 +236,7 @@ sudo /opt/ucxsync/ucxsync
 # Check file permissions
 ls -la /opt/ucxsync
 ls -la /etc/ucxsync
-ls -la /mnt/ucx
+ls -la /ucmount
 ```
 
 ### High CPU usage
@@ -309,7 +309,7 @@ sudo systemctl stop ucxsync
 sudo systemctl disable ucxsync
 
 # Unmount shares
-sudo umount /mnt/ucx/*/[EF]
+sudo umount /ucmount/*/[EF]
 
 # Remove files
 sudo rm -rf /opt/ucxsync
@@ -319,14 +319,14 @@ sudo systemctl daemon-reload
 
 # Optionally remove config and mounts
 sudo rm -rf /etc/ucxsync
-sudo rm -rf /mnt/ucx
+sudo rm -rf /ucmount
 ```
 
 ## Security Considerations
 
 1. **Credentials file**: Protected at 0600 permissions
 2. **Network**: Restrict web interface to localhost or use firewall
-3. **SMB**: Uses SMB3.0 by default (more secure than SMB1)
+3. **SMB**: Current mount code uses `vers=1.0` for compatibility with legacy UCX nodes
 4. **Logs**: Contains no sensitive information
 
 ### Firewall Configuration
@@ -348,7 +348,6 @@ sudo ufw allow from 192.168.1.0/24 to any port 8080
 ```yaml
 sync:
   max_parallelism: 16
-  buffer_size: 65536  # 64 KB
 
 monitoring:
   max_disk_throughput_mbps: 1000.0

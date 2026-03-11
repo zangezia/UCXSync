@@ -1,4 +1,4 @@
-# UCXSync Configuration for Linux
+# UCXSync configuration for Linux
 
 # Network nodes to sync from
 nodes:
@@ -27,21 +27,14 @@ credentials:
   username: Administrator
   password: ultracam
 
-# Network mounting
-network:
-  base_mount_dir: /mnt/ucx
-  auto_mount: true
-  mount_timeout: 30s
-
 # Synchronization settings
 sync:
   project: "Arh2k_mezen_200725"      # Project name (used in file paths)
-  destination: "/mnt/storage"         # USB-SSD mount point (auto-mounted)
+  destination: "/ucdata"              # Default destination root
   max_parallelism: 8
   service_loop_interval: 10s
   min_free_disk_space: 52428800      # 50 MB
   disk_space_safety_margin: 104857600 # 100 MB
-  buffer_size: 32768                  # 32 KB copy buffer
 
 # Web server
 web:
@@ -63,4 +56,7 @@ logging:
   max_size: 100     # MB
   max_backups: 5
   max_age: 30       # days
-  compress: true
+
+# Notes:
+# - Network shares are currently mounted under /ucmount in code.
+# - Block-device management in the web UI also assumes Linux system tools.

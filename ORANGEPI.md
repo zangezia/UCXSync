@@ -160,7 +160,7 @@ watch -n 1 'cat /sys/class/thermal/thermal_zone0/temp | awk "{print \$1/1000 \"�
 sudo nano /etc/fstab
 
 # Добавьте строку:
-UUID=ваш-uuid /mnt/storage ext4 defaults,nofail 0 2
+UUID=ваш-uuid /ucdata ext4 defaults,nofail 0 2
 
 # Узнать UUID:
 sudo blkid
@@ -385,7 +385,7 @@ network:
 
 ```bash
 # В /etc/fstab добавьте noatime
-UUID=xxx /mnt/storage ext4 defaults,noatime,nofail 0 2
+UUID=xxx /ucdata ext4 defaults,noatime,nofail 0 2
 ```
 
 ### 4. Мониторинг производительности

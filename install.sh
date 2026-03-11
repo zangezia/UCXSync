@@ -124,28 +124,28 @@ mkdir -p /etc/ucxsync
 mkdir -p /var/log/ucxsync
 
 # Create mount points for UCX nodes (network shares)
-mkdir -p /mnt/ucx
-echo -e "${GREEN}✓${NC} Created /mnt/ucx (UCX network mount points)"
+mkdir -p /ucmount
+echo -e "${GREEN}✓${NC} Created /ucmount (UCX network mount points)"
 
 # Create storage directory for USB-SSD
-mkdir -p /mnt/storage
-echo -e "${GREEN}✓${NC} Created /mnt/storage (USB-SSD mount point)"
+mkdir -p /ucdata
+echo -e "${GREEN}✓${NC} Created /ucdata (USB-SSD mount point)"
 
 # Check if USB-SSD is already mounted
-if mountpoint -q /mnt/storage; then
-    echo -e "${GREEN}✓${NC} /mnt/storage is already mounted"
+if mountpoint -q /ucdata; then
+    echo -e "${GREEN}✓${NC} /ucdata is already mounted"
     
     # Set permissions for user access
     USER_NAME=${SUDO_USER:-$(whoami)}
-    chown -R $USER_NAME:$USER_NAME /mnt/storage 2>/dev/null || true
-    echo -e "${GREEN}✓${NC} Permissions set for /mnt/storage"
+    chown -R $USER_NAME:$USER_NAME /ucdata 2>/dev/null || true
+    echo -e "${GREEN}✓${NC} Permissions set for /ucdata"
 else
-    echo -e "${YELLOW}⚠${NC}  /mnt/storage is not mounted"
-    echo -e "${YELLOW}⚠${NC}  You need to mount your USB-SSD to /mnt/storage"
+    echo -e "${YELLOW}⚠${NC}  /ucdata is not mounted"
+    echo -e "${YELLOW}⚠${NC}  You need to mount your USB-SSD to /ucdata"
     echo ""
     echo "Option 1 - Manual mount (simple):"
     echo "  1. Find your device: lsblk"
-    echo "  2. Mount it: sudo mount /dev/sdX1 /mnt/storage"
+    echo "  2. Mount it: sudo mount /dev/sdX1 /ucdata"
     echo ""
     echo "Option 2 - Auto-mount (recommended):"
     echo "  Run: sudo ./setup-usb-automount.sh"
@@ -236,32 +236,27 @@ echo -e "${YELLOW}   IMPORTANT: USB-SSD Setup${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 # Check if USB-SSD is mounted
-if ! mountpoint -q /mnt/storage; then
+if ! mountpoint -q /ucdata; then
     echo ""
     echo -e "${RED}⚠ USB-SSD is NOT mounted!${NC}"
     echo ""
-    echo "UCXSync requires an external USB-SSD mounted at /mnt/storage"
+    echo "UCXSync requires an external USB-SSD mounted at /ucdata"
     echo ""
     echo -e "${BLUE}Quick setup:${NC}"
     echo "  1. Connect your USB-SSD"
     echo "  2. Find device:    lsblk"
-    echo "  3. Mount:          sudo mount /dev/sdX1 /mnt/storage"
-    echo "  4. Create dir:     sudo mkdir -p /mnt/storage/ucx"
-    echo "  5. Set owner:      sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo "  3. Mount:          sudo mount /dev/sdX1 /ucdata"
+    echo "  4. Set owner:      sudo chown -R \$USER:\$USER /ucdata"
     echo ""
     echo -e "${BLUE}See detailed guide:${NC} USB-SSD-GUIDE.md"
     echo ""
 else
     echo ""
-    echo -e "${GREEN}✓ USB-SSD is mounted at /mnt/storage${NC}"
+    echo -e "${GREEN}✓ USB-SSD is mounted at /ucdata${NC}"
     
     # Show storage info
-    STORAGE_INFO=$(df -h /mnt/storage | tail -1 | awk '{print $2 " total, " $4 " free"}')
+    STORAGE_INFO=$(df -h /ucdata | tail -1 | awk '{print $2 " total, " $4 " free"}')
     echo -e "${BLUE}Storage:${NC} $STORAGE_INFO"
-    
-    if [ -d /mnt/storage/ucx ]; then
-        echo -e "${GREEN}✓ Data directory ready: /mnt/storage/ucx${NC}"
-    fi
     echo ""
 fi
 
@@ -274,7 +269,7 @@ echo "   sudo nano /etc/ucxsync/config.yaml"
 echo ""
 echo "   Update these settings:"
 echo "   - sync.project (your project name)"
-echo "   - sync.destination (/mnt/storage)"
+    echo "   - sync.destination (/ucdata)"
 echo "   - credentials.username and password"
 echo ""
 echo "2. ${BLUE}Setup USB-SSD auto-mount (recommended):${NC}"

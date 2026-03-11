@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Auto-mount USB-SSD Script for UCXSync
-# This script creates udev rules to automatically mount the first USB storage device to /mnt/storage
+# This script creates udev rules to automatically mount the first USB storage device to /ucdata
 #
 
 set -e
@@ -26,20 +26,20 @@ fi
 
 # Create mount point
 echo -e "${BLUE}[1/4] Creating mount point...${NC}"
-mkdir -p /mnt/storage
-echo -e "${GREEN}✓${NC} Created /mnt/storage"
+mkdir -p /ucdata
+echo -e "${GREEN}✓${NC} Created /ucdata"
 
 # Create systemd mount unit
 echo -e "${BLUE}[2/4] Creating systemd mount service...${NC}"
 
-cat > /etc/systemd/system/mnt-storage.mount << 'EOF'
+cat > /etc/systemd/system/ucdata.mount << 'EOF'
 [Unit]
 Description=USB-SSD Storage for UCXSync
 After=local-fs.target
 
 [Mount]
 What=/dev/disk/by-label/UCX-Storage
-Where=/mnt/storage
+Where=/ucdata
 Type=auto
 Options=defaults,nofail,x-systemd.device-timeout=5
 
@@ -48,13 +48,13 @@ WantedBy=multi-user.target
 EOF
 
 # Create automount unit
-cat > /etc/systemd/system/mnt-storage.automount << 'EOF'
+cat > /etc/systemd/system/ucdata.automount << 'EOF'
 [Unit]
 Description=Auto-mount USB-SSD for UCXSync
 Before=ucxsync.service
 
 [Automount]
-Where=/mnt/storage
+Where=/ucdata
 TimeoutIdleSec=0
 
 [Install]
@@ -67,7 +67,7 @@ echo -e "${GREEN}✓${NC} Systemd units created"
 echo -e "${BLUE}[3/4] Creating udev rule...${NC}"
 
 cat > /etc/udev/rules.d/99-usb-storage-automount.rules << 'EOF'
-# Auto-mount USB/SCSI storage device to /mnt/storage
+# Auto-mount USB/SCSI storage device to /ucdata
 # Samsung T7 and similar USB-SSD devices appear as SCSI, not USB
 
 ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", \
@@ -82,10 +82,10 @@ EOF
 # Create mount helper script
 cat > /usr/local/bin/ucxsync-mount-usb.sh << 'EOF'
 #!/bin/bash
-# Auto-mount USB device to /mnt/storage
+# Auto-mount USB device to /ucdata
 
 DEVICE="/dev/$1"
-MOUNT_POINT="/mnt/storage"
+MOUNT_POINT="/ucdata"
 LOCK_FILE="/var/lock/ucxsync-usb-mount"
 
 # Full paths for udev/systemd context
@@ -135,10 +135,10 @@ EOF
 # Create unmount helper script
 cat > /usr/local/bin/ucxsync-unmount-usb.sh << 'EOF'
 #!/bin/bash
-# Auto-unmount USB device from /mnt/storage
+# Auto-unmount USB device from /ucdata
 
 DEVICE="/dev/$1"
-MOUNT_POINT="/mnt/storage"
+MOUNT_POINT="/ucdata"
 
 # Full paths for udev/systemd context
 MOUNTPOINT="/bin/mountpoint"
@@ -185,18 +185,17 @@ echo ""
 echo "2. Test auto-mount:"
 echo "   - Disconnect your USB-SSD"
 echo "   - Reconnect it"
-echo "   - Check: mountpoint /mnt/storage"
+echo "   - Check: mountpoint /ucdata"
 echo ""
 echo "3. Update UCXSync config:"
 echo "   sudo nano /etc/ucxsync/config.yaml"
-echo "   Change: destination: \"/mnt/storage\""
+echo "   Change: destination: \"/ucdata\""
 echo ""
-echo "4. If you have existing data in /mnt/storage/ucx:"
-echo "   sudo mv /mnt/storage/ucx/* /mnt/storage/"
-echo "   sudo rmdir /mnt/storage/ucx"
+echo "4. If you have existing data in the old mount location:"
+echo "   move it to /ucdata before enabling the service"
 echo ""
 echo -e "${YELLOW}Notes:${NC}"
-echo "- First connected USB storage will be auto-mounted to /mnt/storage"
+echo "- First connected USB storage will be auto-mounted to /ucdata"
 echo "- Device must be formatted (ext4, NTFS, exFAT, etc.)"
 echo "- Auto-mount happens within 2-3 seconds of connection"
 echo "- Check logs: journalctl | grep UCXSync"

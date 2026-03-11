@@ -8,7 +8,7 @@ set -e
 INSTALL_DIR="/opt/ucxsync"
 CONFIG_DIR="/etc/ucxsync"
 LOG_DIR="/var/log/ucxsync"
-MOUNT_DIR="/mnt/ucx"
+MOUNT_DIR="/ucmount"
 BINARY_NAME="ucxsync"
 
 # Colors for output
@@ -78,24 +78,24 @@ mkdir -p "$MOUNT_DIR"
 echo -e "${GREEN}✓${NC} Created $MOUNT_DIR (UCX network mount points)"
 
 # Create storage directory for USB-SSD
-mkdir -p /mnt/storage
-echo -e "${GREEN}✓${NC} Created /mnt/storage (USB-SSD mount point)"
+mkdir -p /ucdata
+echo -e "${GREEN}✓${NC} Created /ucdata (USB-SSD mount point)"
 
 # Check if USB-SSD is already mounted
-if mountpoint -q /mnt/storage; then
-    echo -e "${GREEN}✓${NC} /mnt/storage is already mounted"
+if mountpoint -q /ucdata; then
+    echo -e "${GREEN}✓${NC} /ucdata is already mounted"
     
     # Set permissions for user access
     USER_NAME=${SUDO_USER:-$(whoami)}
-    chown -R $USER_NAME:$USER_NAME /mnt/storage 2>/dev/null || true
-    echo -e "${GREEN}✓${NC} Permissions set for /mnt/storage"
+    chown -R $USER_NAME:$USER_NAME /ucdata 2>/dev/null || true
+    echo -e "${GREEN}✓${NC} Permissions set for /ucdata"
 else
-    echo -e "${YELLOW}⚠${NC}  /mnt/storage is not mounted"
-    echo -e "${YELLOW}⚠${NC}  You need to mount your USB-SSD to /mnt/storage"
+    echo -e "${YELLOW}⚠${NC}  /ucdata is not mounted"
+    echo -e "${YELLOW}⚠${NC}  You need to mount your USB-SSD to /ucdata"
     echo ""
     echo "Option 1 - Manual mount:"
     echo "  1. Find your device: lsblk"
-    echo "  2. Mount it: sudo mount /dev/sdX1 /mnt/storage"
+    echo "  2. Mount it: sudo mount /dev/sdX1 /ucdata"
     echo ""
     echo "Option 2 - Auto-mount (recommended):"
     echo "  Run: sudo ./setup-usb-automount.sh"
@@ -155,7 +155,7 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=$LOG_DIR $MOUNT_DIR
+ReadWritePaths=$LOG_DIR $MOUNT_DIR /ucdata
 
 [Install]
 WantedBy=multi-user.target
@@ -171,21 +171,20 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 
 # Check USB-SSD status
-if ! mountpoint -q /mnt/storage; then
+if ! mountpoint -q /ucdata; then
     echo -e "${RED}⚠ WARNING: USB-SSD is NOT mounted!${NC}"
     echo ""
-    echo "UCXSync requires an external USB-SSD mounted at /mnt/storage"
+    echo "UCXSync requires an external USB-SSD mounted at /ucdata"
     echo ""
     echo -e "${YELLOW}Quick setup:${NC}"
     echo "  1. Connect your USB-SSD"
     echo "  2. Find device:    lsblk"
-    echo "  3. Mount:          sudo mount /dev/sdX1 /mnt/storage"
-    echo "  4. Create dir:     sudo mkdir -p /mnt/storage/ucx"
-    echo "  5. Set owner:      sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo "  3. Mount:          sudo mount /dev/sdX1 /ucdata"
+    echo "  4. Set owner:      sudo chown -R \$USER:\$USER /ucdata"
     echo ""
 else
-    echo -e "${GREEN}✓ USB-SSD is mounted at /mnt/storage${NC}"
-    STORAGE_INFO=$(df -h /mnt/storage 2>/dev/null | tail -1 | awk '{print $2 " total, " $4 " free"}')
+    echo -e "${GREEN}✓ USB-SSD is mounted at /ucdata${NC}"
+    STORAGE_INFO=$(df -h /ucdata 2>/dev/null | tail -1 | awk '{print $2 " total, " $4 " free"}')
     echo -e "${YELLOW}Storage:${NC} $STORAGE_INFO"
     echo ""
 fi
@@ -197,7 +196,7 @@ echo "   sudo nano $CONFIG_DIR/config.yaml"
 echo ""
 echo "   Update these settings:"
 echo "   - sync.project (your project name)"
-echo "   - sync.destination (/mnt/storage)"
+    echo "   - sync.destination (/ucdata)"
 echo "   - credentials.username and password"
 echo ""
 echo "2. Setup USB-SSD auto-mount (recommended):"
@@ -221,7 +220,7 @@ echo ""
 echo -e "${YELLOW}Orange Pi RV2 optimization tips:${NC}"
 echo "- Keep max_parallelism at 3-4 for RISC-V (see config.orangepi.yaml)"
 echo "- Monitor CPU temperature: cat /sys/class/thermal/thermal_zone0/temp"
-echo "- Use USB 3.0 SSD for best performance (/mnt/storage)"
+echo "- Use USB 3.0 SSD for best performance (/ucdata)"
 echo "- Consider active cooling for 24/7 operation"
 echo ""
 echo -e "${YELLOW}Documentation:${NC}"

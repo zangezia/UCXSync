@@ -111,7 +111,7 @@ sudo sysctl -w net.ipv4.tcp_wmem='4096 65536 67108864'
 ```bash
 # ext4 с оптимизацией для больших файлов
 sudo tune2fs -O fast_commit /dev/sdX
-sudo mount -o remount,noatime,commit=60 /mnt/storage
+sudo mount -o remount,noatime,commit=60 /ucdata
 ```
 
 ### 4. Приоритет процесса

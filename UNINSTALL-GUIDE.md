@@ -25,8 +25,8 @@ sudo systemctl disable ucxsync 2>/dev/null
 sudo rm -f /usr/local/bin/ucxsync
 sudo rm -rf /etc/ucxsync
 sudo rm -f /etc/systemd/system/ucxsync.service
-sudo rm -rf /mnt/storage/ucx
-sudo rm -rf /mnt/ucx
+sudo rm -rf /ucdata/ucx
+sudo rm -rf /ucmount
 
 # Обновить systemd
 sudo systemctl daemon-reload
@@ -49,7 +49,7 @@ sudo rm -f /etc/systemd/system/ucxsync.service
 sudo systemctl daemon-reload
 
 # Конфиг остаётся в /etc/ucxsync
-# Данные остаются в /mnt/storage/ucx
+# Данные остаются в /ucdata/ucx
 
 echo "✓ UCXSync удалён (конфиг и данные сохранены)"
 ```
@@ -102,7 +102,7 @@ ls -l /usr/local/bin/ucxsync
 ls -l /etc/ucxsync/
 
 # Проверить данные
-du -sh /mnt/storage/ucx
+du -sh /ucdata/ucx
 
 # Проверить сервис
 systemctl status ucxsync
@@ -121,14 +121,14 @@ sudo systemctl stop ucxsync 2>/dev/null
 sudo systemctl disable ucxsync 2>/dev/null
 
 # Размонтировать сетевые диски
-sudo umount /mnt/ucx/* 2>/dev/null || true
+sudo umount /ucmount/* 2>/dev/null || true
 
 # Удалить всё
 sudo rm -f /usr/local/bin/ucxsync
 sudo rm -rf /etc/ucxsync
 sudo rm -f /etc/systemd/system/ucxsync.service
-sudo rm -rf /mnt/storage/ucx
-sudo rm -rf /mnt/ucx
+sudo rm -rf /ucdata/ucx
+sudo rm -rf /ucmount
 sudo rm -rf /opt/ucxsync
 sudo rm -rf /var/log/ucxsync
 
@@ -170,7 +170,7 @@ systemctl status ucxsync
 ## Одна команда - всё удалить
 
 ```bash
-sudo systemctl stop ucxsync 2>/dev/null; sudo systemctl disable ucxsync 2>/dev/null; sudo rm -f /usr/local/bin/ucxsync; sudo rm -rf /etc/ucxsync; sudo rm -f /etc/systemd/system/ucxsync.service; sudo rm -rf /mnt/storage/ucx; sudo rm -rf /mnt/ucx; sudo systemctl daemon-reload; echo "✓ UCXSync удалён"
+sudo systemctl stop ucxsync 2>/dev/null; sudo systemctl disable ucxsync 2>/dev/null; sudo rm -f /usr/local/bin/ucxsync; sudo rm -rf /etc/ucxsync; sudo rm -f /etc/systemd/system/ucxsync.service; sudo rm -rf /ucdata/ucx; sudo rm -rf /ucmount; sudo systemctl daemon-reload; echo "✓ UCXSync удалён"
 ```
 
 ---

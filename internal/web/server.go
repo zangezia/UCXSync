@@ -28,6 +28,11 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+const (
+	defaultNetworkMountRoot = "/ucmount"
+	defaultDataMountPoint   = "/ucdata"
+)
+
 // Server represents the web server
 type Server struct {
 	cfg         *config.Config
@@ -70,7 +75,7 @@ func NewServer(cfg *config.Config) *Server {
 	svc := syncService.New(
 		cfg.Nodes,
 		cfg.Shares,
-		"/mnt/ucx", // TODO: Get from config
+		defaultNetworkMountRoot, // TODO: Get from config
 	)
 
 	monService := monitor.New(
@@ -431,12 +436,12 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 		}
 
 		// Skip UCX network mounts
-		if strings.HasPrefix(mountPoint, "/mnt/ucx") {
+		if strings.HasPrefix(mountPoint, defaultNetworkMountRoot) {
 			continue
 		}
 
-		// Only allow external storage: /mnt/* and /media/*
-		if !strings.HasPrefix(mountPoint, "/mnt/") && !strings.HasPrefix(mountPoint, "/media/") {
+		// Only allow external storage: /media/* or the configured default data mount.
+		if mountPoint != defaultDataMountPoint && !strings.HasPrefix(mountPoint, "/media/") {
 			continue
 		}
 
@@ -444,8 +449,8 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 		if strings.HasPrefix(device, "/dev/sd") || strings.HasPrefix(device, "/dev/nvme") {
 			destType = "usb"
 
-			// Check if it's /mnt/storage (our default USB-SSD mount)
-			if mountPoint == "/mnt/storage" {
+			// Check if it's the default USB-SSD mount.
+			if mountPoint == defaultDataMountPoint {
 				label = "USB-SSD Storage (default)"
 				isDefault = true
 			} else {
@@ -607,7 +612,7 @@ func (s *Server) getBlockDevices() ([]models.BlockDeviceInfo, error) {
 		}
 
 		// Skip UCX network mounts
-		if strings.HasPrefix(dev.MountPoint, "/mnt/ucx") {
+		if strings.HasPrefix(dev.MountPoint, defaultNetworkMountRoot) {
 			continue
 		}
 
@@ -657,9 +662,9 @@ func (s *Server) getBlockDevices() ([]models.BlockDeviceInfo, error) {
 	return devices, nil
 }
 
-// mountDevice mounts a device to /mnt/storage
+// mountDevice mounts a device to /ucdata
 func (s *Server) mountDevice(devicePath string) error {
-	mountPoint := "/mnt/storage"
+	mountPoint := defaultDataMountPoint
 
 	// Check if something is already mounted
 	if isMounted, _ := isPathMounted(mountPoint); isMounted {
@@ -688,7 +693,7 @@ func (s *Server) mountDevice(devicePath string) error {
 
 // unmountDevice unmounts a device
 func (s *Server) unmountDevice(devicePath string) error {
-	mountPoint := "/mnt/storage"
+	mountPoint := defaultDataMountPoint
 
 	// Check if the device is actually mounted at this location
 	mounted, err := isDeviceMountedAt(devicePath, mountPoint)

@@ -1,136 +1,116 @@
 # UCXSync
 
-High-performance file synchronization tool for UCX projects with web-based monitoring (Linux-only).
+Linux-only file synchronization service for UCX projects with a browser-based monitoring UI.
 
-## Overview
+## What the application does
 
-UCXSync is a Linux Go application that synchronizes files from multiple network nodes to a local destination with real-time performance monitoring through a web interface.
+`UCXSync` connects to multiple UCX worker nodes over CIFS/SMB, scans project folders on mounted shares, and incrementally copies capture files to local storage.
 
-### Key Features
+The application combines three subsystems:
 
-- **Multi-node synchronization**: Parallel copying from 14 nodes (WU01-WU13 worker nodes + CU control unit)
-- **Multiple sources**: Each node has 2 network shares (E$, F$) = 28 sources total
-- **Incremental sync**: Only copies new or modified files
-- **Configurable parallelism**: Adjustable concurrent file operations
-- **Capture tracking**: Automatic detection and tracking of completed captures
-  - Normal captures: 13 RAW + 1 XML = 14 files
-  - Test captures: 13 RAW files (XML optional)
-- **File type recognition**: Distinguishes verified (Lvl00) and unverified (Lvl0X) captures
-- **Test capture support**: Separate tracking for test captures (marked with "T")
-- **Metadata handling**: EAD XML files from CU node (may be missing for test captures)
-- **Web interface**: Real-time monitoring via browser
-- **Performance metrics**: Live CPU, disk, network, and memory monitoring
-- **CIFS/SMB mounting**: Automatic mounting of network shares
+- **network mounting** — mount/unmount CIFS shares from UCX nodes;
+- **synchronization** — detect new or changed files and copy them in parallel;
+- **web monitoring** — show status, logs, and host metrics in real time.
 
-## Architecture
+## Runtime environment
 
-```
-UCXSync/
-├── cmd/
-│   └── ucxsync/           # Main application entry point
-├── internal/
-│   ├── config/            # Configuration management
-│   ├── sync/              # File synchronization engine
-│   ├── monitor/           # Performance monitoring
-│   ├── network/           # Network credentials & SMB mounting
-│   ├── storage/           # Settings persistence
-│   └── web/               # Web server & WebSocket handlers
-├── pkg/
-│   └── models/            # Shared data models
-├── web/
-│   ├── static/            # CSS, JS, images
-│   └── templates/         # HTML templates
-├── go.mod
-├── go.sum
-├── Makefile
-└── README.md
-```
+### Supported environment
 
-## System Requirements
+- **OS**: Linux
+- **Architectures**: AMD64, ARM64, RISC-V 64
+- **Privileges**: root / `sudo` required for mount operations
+- **External tools**:
+  - `cifs-utils` (`mount.cifs`)
+  - `mount` / `umount`
+  - `lsblk`
+- **Go**: 1.21+ for building from source
 
-- **OS**: Ubuntu 20.04+ (tested on Ubuntu Server 24.04, Orange Pi compatible)
-- **Architecture**: RISC-V 64-bit / ARM64 / AMD64
-- **Hardware**: Orange Pi RV2 (RISC-V) or compatible SBC / Laptop / Server
-- **Go**: 1.21 or higher (for building from source)
-- **CIFS**: `cifs-utils` package for SMB mounting
-- **Permissions**: sudo/root for mounting network shares
-- **Storage**: 
-  - Internal: Minimum 50 MB for application
-  - **External USB-SSD**: 500GB - 2TB for data storage (recommended)
-- **Network**: Access to UCX worker nodes (WU01-WU13, CU)
+### Important limitation
 
-## 📚 Documentation
+The codebase can be built on non-Linux hosts for development, but the full runtime feature set depends on Linux-specific interfaces such as `/proc/mounts`, CIFS mounting, and block-device management.
 
-### Quick Start Guides
-- **[🚀 Quick Start (Russian)](README.ru.md)** - Быстрый старт на русском
-- **[📋 Cheat Sheet](CHEATSHEET.md)** - Quick reference commands
-- **[🧪 Testing Guide](TESTING-ON-LAPTOP.md)** - Laptop testing instructions
+## Core features
 
-### Platform-Specific Guides
-- **[🐧 Linux AMD64](LINUX.md)** - Standard server installation
-- **[🍊 Orange Pi RV2](ORANGEPI.md)** - RISC-V specific guide
-- **[⚙️ RISC-V Details](RISCV.md)** - Architecture information
+- Incremental synchronization from 14 nodes (`WU01`-`WU13` + `CU`)
+- Multiple shares per node (default: `E$`, `F$`)
+- Global configurable parallelism for file-copy operations
+- Capture completion tracking:
+  - normal capture = 13 RAW + 1 XML;
+  - test capture = 13 RAW, XML optional
+- Web UI with real-time status and metrics
+- Removable-storage discovery and mount/unmount helpers in the web API
 
-### Architecture & Setup
-- **[📁 Storage Architecture](STORAGE-ARCHITECTURE.md)** - Understanding `/mnt/ucx` vs `/mnt/storage/ucx`
-- **[💾 USB-SSD Guide](USB-SSD-GUIDE.md)** - External storage setup and troubleshooting
-- **[🔧 Build Instructions](BUILD.md)** - Multi-architecture build guide
-- **[⚡ Parallelism](PARALLELISM.md)** - Understanding concurrency control
+## How it works
 
-### Maintenance
-- **[🧹 Uninstall Guide](UNINSTALL-GUIDE.md)** - Complete removal instructions
-- **[📊 Testing](TEST.md)** - Comprehensive testing procedures
+1. Load config from `config.yaml` or built-in defaults.
+2. Optionally mount remote shares under `/ucmount`.
+3. Start the web server.
+4. When synchronization starts, scan mounted project directories.
+5. Copy only missing or modified files into the target destination.
+6. Broadcast status, logs, CPU, memory, disk, and network metrics to the UI.
 
-## Installation
-
-### Linux AMD64/x86_64 Servers
-
-For standard Linux servers (Ubuntu, Debian, CentOS, RHEL), see:
-**[📘 Linux Installation Guide](LINUX.md)**
-
-Quick install:
-```bash
-sudo chmod +x install.sh
-sudo ./install.sh
-```
-
-### Orange Pi RV2 (RISC-V)
-
-For Orange Pi RV2 with Ubuntu Server 24.04, see detailed guide:
-**[📘 Orange Pi Installation Guide](ORANGEPI.md)**
-
-Quick install:
-```bash
-sudo chmod +x install-orangepi.sh
-sudo ./install-orangepi.sh
-```
-
-### From Source
+## Commands
 
 ```bash
-# Clone the repository
+ucxsync
+ucxsync mount
+ucxsync unmount
+ucxsync check
+```
+
+Common flags:
+
+```bash
+ucxsync --config /path/to/config.yaml
+ucxsync --debug
+ucxsync --project MyProject --dest /ucdata
+ucxsync --port 9090
+ucxsync --parallelism 8
+```
+
+## Quick start
+
+### Build from source
+
+```bash
 git clone https://github.com/zangezia/UCXSync.git
 cd UCXSync
-
-# Build
 go build -o ucxsync ./cmd/ucxsync
-
-# Run
-./ucxsync
 ```
 
-### Using Go Install
+### Check prerequisites
 
 ```bash
-go install github.com/zangezia/UCXSync/cmd/ucxsync@latest
+sudo ./ucxsync check
+```
+
+### Run the service
+
+```bash
+sudo ./ucxsync --config /etc/ucxsync/config.yaml
+```
+
+Open the UI at:
+
+```text
+http://localhost:8080
 ```
 
 ## Configuration
 
-Create `config.yaml` in the application directory:
+Use `config.example.yaml` as the source of truth. The currently supported top-level sections are:
+
+- `nodes`
+- `shares`
+- `credentials`
+- `sync`
+- `web`
+- `monitoring`
+- `logging`
+
+Minimal example:
 
 ```yaml
-# Network configuration
 nodes:
   - WU01
   - WU02
@@ -151,380 +131,132 @@ shares:
   - E$
   - F$
 
-# Authentication (Windows)
 credentials:
   username: Administrator
   password: ultracam
 
-# Synchronization settings
 sync:
+  project: Arh2k_mezen_200725
+  destination: /ucdata
   max_parallelism: 8
   service_loop_interval: 10s
-  min_free_disk_space: 52428800  # 50 MB
-  disk_space_safety_margin: 104857600  # 100 MB
+  min_free_disk_space: 52428800
+  disk_space_safety_margin: 104857600
 
-# Web server
 web:
-  host: localhost
+  host: 0.0.0.0
   port: 8080
 
-# Monitoring
 monitoring:
   performance_update_interval: 1s
   ui_update_interval: 2s
   cpu_smoothing_samples: 3
   max_disk_throughput_mbps: 200.0
-  network_speed_bps: 1000000000  # 1 Gbps
+  network_speed_bps: 1000000000
 
-# Logging
 logging:
   level: info
-  file: logs/ucxsync.log
-  max_size: 100  # MB
+  file: /var/log/ucxsync/ucxsync.log
+  max_size: 100
   max_backups: 5
-  max_age: 30  # days
+  max_age: 30
 ```
 
-## Usage
+## HTTP and WebSocket API
 
-### Start the application
+### REST endpoints
 
-```bash
-# Start with default configuration
-./ucxsync
+- `GET /api/projects`
+- `GET /api/destinations`
+- `GET /api/devices`
+- `POST /api/devices/mount`
+- `GET /api/status`
+- `POST /api/sync/start`
+- `POST /api/sync/stop`
 
-# Start with custom config file
-./ucxsync --config /path/to/config.yaml
+### WebSocket endpoint
 
-# Start with custom web port
-./ucxsync --port 9090
-```
+- `GET /ws`
 
-### Access the web interface
+Current message types:
 
-Open your browser and navigate to:
-```
-http://localhost:8080
-```
+- `status`
+- `metrics`
+- `log`
 
-### Command-line options
+## Capture naming rules
 
-```bash
-# Show help
-./ucxsync --help
+### RAW files
 
-# Show version
-./ucxsync --version
+Examples:
 
-# Start with specific project and destination
-./ucxsync --project MyProject --dest /path/to/destination
-
-# Enable debug logging
-./ucxsync --debug
-```
-
-## Web Interface
-
-The web interface provides:
-
-1. **Control Panel**
-   - Project selection (auto-discovered from network)
-   - Destination path selection
-   - Parallelism configuration
-   - Start/Stop controls
-
-2. **Real-time Monitoring**
-   - Live log stream
-   - Completed captures counter
-   - Test captures counter
-   - Last capture number
-
-3. **Performance Metrics**
-   - CPU usage (with smoothing)
-   - Disk throughput
-   - Network throughput
-   - Free disk space
-
-4. **Activity Table**
-   - Per-node synchronization status
-   - Files downloaded per node
-   - Progress percentage
-   - Last update time
-
-## API Endpoints
-
-### REST API
-
-- `GET /api/projects` - List available projects
-- `GET /api/status` - Get current sync status
-- `POST /api/sync/start` - Start synchronization
-- `POST /api/sync/stop` - Stop synchronization
-
-### WebSocket
-
-- `ws://localhost:8080/ws` - Real-time updates
-  - `log` - Log messages
-  - `status` - Status updates
-  - `progress` - Progress updates
-  - `metrics` - Performance metrics
-
-## Capture File Format
-
-UCXSync automatically detects and tracks capture files from 14 nodes:
-
-### File Naming Convention
-
-**RAW files** (13 files from WU01-WU13 nodes):
-```
+```text
 Lvl00-00001-Arh2k_mezen_200725-06-00-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.raw
 Lvl0X-00002-T-Arh2k_mezen_200725-06-00-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.raw
 ```
 
-**XML metadata file** (1 file from CU node):
-```
+### XML metadata files
+
+```text
 EAD-00001-Arh2k_mezen_200725-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.xml
 ```
 
-### Format Structure
+Completion rules:
 
-**RAW file format:**
-```
-Lvl00-00001-T-Arh2k_mezen_200725-06-00-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.raw
-│     │     │ │                  │     └──────────────────────── Session GUID
-│     │     │ │                  └────────────────────────────── Sensor Code (XX-YY)
-│     │     │ └───────────────────────────────────────────────── Project Name
-│     │     └─────────────────────────────────────────────────── Test Marker (optional)
-│     └───────────────────────────────────────────────────────── Capture Number (5 digits)
-└─────────────────────────────────────────────────────────────── Data Type
-```
+- **normal capture**: 13 RAW + 1 XML
+- **test capture**: 13 RAW, XML optional
 
-**XML metadata format:**
-```
-EAD-00001-Arh2k_mezen_200725-BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E.xml
-│   │     │                  └──────────────────────────────────── Session GUID
-│   │     └─────────────────────────────────────────────────────── Project Name
-│   └───────────────────────────────────────────────────────────── Capture Number
-└───────────────────────────────────────────────────────────────── Metadata prefix (EAD)
+## Project layout
+
+```text
+cmd/ucxsync/      CLI and process startup
+internal/config/  config loading and validation
+internal/network/ Linux CIFS mount management
+internal/sync/    synchronization engine
+internal/monitor/ host metrics collection
+internal/web/     HTTP API and WebSocket server
+pkg/models/       shared API models
+web/              frontend assets
+cpp/              experimental Linux-only C++ port scaffold
 ```
 
-### Field Descriptions
+See also: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-**RAW files:**
-- **Data Type**: 
-  - `Lvl00` - Verified capture
-  - `Lvl0X` - Unverified capture (X can be any digit)
-  
-- **Capture Number**: 5-digit sequential number (00001, 00002, etc.)
+## Documentation map
 
-- **Test Marker**: Optional `T-` after capture number indicates test capture
+- [`README.ru.md`](README.ru.md) — quick start in Russian
+- [`LINUX.md`](LINUX.md) — Linux deployment notes
+- [`ORANGEPI.md`](ORANGEPI.md) — Orange Pi / RISC-V deployment
+- [`BUILD.md`](BUILD.md) — build instructions
+- [`TEST.md`](TEST.md) — testing guide
+- [`PARALLELISM.md`](PARALLELISM.md) — concurrency notes
+- [`USB-SSD-GUIDE.md`](USB-SSD-GUIDE.md) — external storage setup
+- [`STORAGE-ARCHITECTURE.md`](STORAGE-ARCHITECTURE.md) — mount and data layout
 
-- **Project Name**: Unique project identifier (e.g., `Arh2k_mezen_200725`)
+## Testing and verification
 
-- **Sensor Code**: Two-part code in format `XX-YY` (e.g., `00-00`, `06-00`, `01-02`)
+Automated tests currently cover part of the sync package.
 
-- **Session GUID**: Unique identifier for the capture session
-
-**XML files:**
-- **EAD Prefix**: Metadata file identifier
-- **Capture Number**: Matches corresponding RAW files
-- **Project Name**: Matches corresponding RAW files
-- **Session GUID**: Matches corresponding RAW files
-
-### Capture Completion
-
-A capture is considered **complete** based on type:
-
-**Normal (non-test) captures:** 14 files required
-- **13 RAW files** - One from each worker node (WU01-WU13)
-- **1 XML file** - Metadata from control unit (CU)
-
-**Test captures:** 13 files required
-- **13 RAW files** - One from each worker node (WU01-WU13)
-- **XML file may be missing** - Test captures might not have metadata
-
-The system tracks each capture by number and marks it complete only when all required components are present.
-
-## Development
-
-### Project Structure
-
-- **cmd/ucxsync/** - Main application
-- **internal/config/** - Configuration loading and validation
-- **internal/sync/** - Core synchronization logic
-- **internal/monitor/** - System performance monitoring
-- **internal/network/** - Network authentication and mounting
-- **internal/storage/** - Settings persistence
-- **internal/web/** - HTTP server and WebSocket handlers
-- **pkg/models/** - Shared data structures
-- **web/** - Frontend assets
-
-### Building
+Typical local checks:
 
 ```bash
-# Build for current platform
-make build
-
-# Build for all platforms
-make build-all
-
-# Run tests
-make test
-
-# Run with live reload (requires air)
-make dev
-```
-
-### Testing
-
-```bash
-# Run all tests
 go test ./...
-
-# Run with coverage
-go test -cover ./...
-
-# Run specific package tests
-go test ./internal/sync/...
+go vet ./...
+go build ./cmd/ucxsync
+./ucxsync --help
 ```
 
-## Linux Setup
+## Current limitations
 
-### Installing CIFS utilities
+- mount root is hard-coded to `/ucmount` in several places;
+- free-space enforcement is not implemented yet in the sync service;
+- block-device and mount operations are Linux-specific and shell out to system tools;
+- the C++ port is experimental and not part of the runtime path.
 
-```bash
-sudo apt-get update
-sudo apt-get install -y cifs-utils
-```
+## Experimental C++ port
 
-### Network share mounting
-
-UCXSync automatically mounts network shares using CIFS. On first run:
-
-```bash
-# Run with sudo for initial setup
-sudo ./ucxsync
-
-# Creates mount points at /mnt/ucx/{node}/{share}
-# Stores credentials in /etc/ucxsync/credentials
-```
-
-### Running as systemd service
-
-```bash
-# Copy service file
-sudo cp ucxsync.service /etc/systemd/system/
-
-# Enable and start
-sudo systemctl enable ucxsync
-sudo systemctl start ucxsync
-
-# Check status
-sudo systemctl status ucxsync
-```
-
-### Mount points structure
-
-```
-/mnt/ucx/
-├── WU01/
-│   ├── E$/
-│   └── F$/
-├── WU02/
-│   ├── E$/
-│   └── F$/
-...
-└── CU/
-    ├── E$/
-    └── F$/
-```
-
-## Performance
-
-- **Throughput**: Up to 200 MB/s disk I/O
-- **Network**: Supports 1 Gbps links
-- **Parallelism**: Default 8 concurrent operations (configurable)
-- **Memory**: ~50-100 MB typical usage
-- **CPU**: Low overhead, <5% on modern systems
-
-## Troubleshooting
-
-### Cannot connect to network shares
-
-**Windows**: Ensure SMB1 is enabled
-```powershell
-Enable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol
-```
-
-**Linux**: Install CIFS utilities
-```bash
-sudo apt-get install cifs-utils
-```
-
-### Insufficient disk space
-
-Ensure at least 150 MB free space (50 MB minimum + 100 MB safety margin)
-
-### High CPU usage
-
-Reduce parallelism in configuration:
-```yaml
-sync:
-  max_parallelism: 4
-```
+The `cpp/` directory is a Linux-only sandbox for porting selected components, starting with configuration loading. It is intentionally isolated from the production Go runtime.
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
-## 🗑️ Uninstallation
-
-To remove UCXSync from your system:
-
-```bash
-cd UCXSync
-chmod +x uninstall.sh
-sudo ./uninstall.sh
-```
-
-Or manually:
-
-```bash
-# Stop and disable service
-sudo systemctl stop ucxsync
-sudo systemctl disable ucxsync
-
-# Remove files
-sudo rm -f /usr/local/bin/ucxsync
-sudo rm -rf /etc/ucxsync
-sudo rm -f /etc/systemd/system/ucxsync.service
-sudo systemctl daemon-reload
-
-# Optionally remove data
-sudo rm -rf /mnt/storage/ucx
-sudo rm -rf /mnt/ucx
-```
-
-## Support
-
-- Issues: https://github.com/zangezia/UCXSync/issues
-- Documentation: https://github.com/zangezia/UCXSync/wiki
-
-## Roadmap
-
-- [ ] Docker container support
-- [ ] Systemd service integration
-- [ ] Email notifications on capture completion
-- [ ] Grafana/Prometheus metrics export
-- [ ] REST API for external integrations
-- [ ] Multiple destination support
-- [ ] Bandwidth throttling
-- [ ] Resume interrupted transfers
+MIT License.

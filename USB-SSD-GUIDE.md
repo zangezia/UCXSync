@@ -1,389 +1,105 @@
-# 💾 Работа с USB-SSD для UCXSync
+# 💾 USB-SSD Guide
 
-## 🎯 Назначение
+This guide describes how to prepare the external destination disk for UCXSync.
 
-UCXSync копирует файлы с сетевых UCX узлов (камер в архиве) на **внешний USB-SSD диск**.
+## Expected mount point
 
-**Почему USB-SSD?**
-- ✅ Портативность - отключил и унёс данные
-- ✅ Большой объём - 500GB-2TB
-- ✅ Не занимает место на ноутбуке
-- ✅ Быстрая скорость копирования
-- ✅ Легко масштабировать - подключил другой USB-SSD
+The USB-SSD should be mounted at:
 
----
+```text
+/ucdata
+```
 
-## 📋 Требования к USB-SSD
+The application writes synchronized files under that destination root.
 
-### Минимальные:
-- **Объём:** 500 GB
-- **Интерфейс:** USB 3.0 (5 Gbps)
-- **Тип:** SSD (не HDD!)
-- **Файловая система:** ext4 / NTFS / exFAT
+## Quick setup
 
-### Рекомендуемые:
-- **Объём:** 1-2 TB
-- **Интерфейс:** USB 3.1/3.2 Gen 2 (10 Gbps)
-- **Тип:** NVMe SSD в USB корпусе
-- **Файловая система:** ext4 (для Linux)
-
-### Примеры дисков:
-- Samsung T7 / T9 (1TB-2TB)
-- Crucial X8 / X10 (1TB-2TB)
-- SanDisk Extreme (1TB-2TB)
-- WD My Passport SSD (1TB-2TB)
-
----
-
-## 🔧 Первоначальная настройка USB-SSD
-
-### 1. Подключение и проверка
+### 1. Find the device
 
 ```bash
-# Подключите USB-SSD к ноутбуку
-
-# Проверьте что система видит диск
 lsblk
 ```
 
-**Ожидаемый вывод:**
-```
-NAME   MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
-sda      8:0    0   1.8T  0 disk           ← ваш USB-SSD
-└─sda1   8:1    0   1.8T  0 part           ← раздел на нём
-nvme0n1        259:0    0 512G  0 disk    
-└─nvme0n1p1    259:1    0 512G  0 part /   ← встроенный диск ноутбука
-```
-
-### 2. Форматирование (если новый диск)
-
-**⚠️ ВНИМАНИЕ: Это удалит ВСЕ данные на диске!**
+### 2. Create the mount point
 
 ```bash
-# Если диск новый или нужно переформатировать:
-
-# 1. Размонтируйте если смонтирован
-sudo umount /dev/sda1 2>/dev/null || true
-
-# 2. Создайте раздел (если нужно)
-sudo fdisk /dev/sda
-# Нажмите: n → p → 1 → Enter → Enter → w
-
-# 3. Отформатируйте в ext4
-sudo mkfs.ext4 -L "UCX-Storage" /dev/sda1
-
-# 4. Проверьте
-lsblk -f
+sudo mkdir -p /ucdata
 ```
 
-### 3. Монтирование
+### 3. Mount the disk
 
 ```bash
-# Создайте точку монтирования
-sudo mkdir -p /mnt/storage
-
-# Смонтируйте USB-SSD
-sudo mount /dev/sda1 /mnt/storage
-
-# Проверьте
-df -h /mnt/storage
+sudo mount /dev/sdX1 /ucdata
+df -h /ucdata
 ```
 
-**Ожидаемый вывод:**
-```
-Filesystem      Size  Used Avail Use% Mounted on
-/dev/sda1       1.8T   77M  1.7T   1% /mnt/storage
-```
-
-### 4. Подготовка для UCXSync
+### 4. Fix ownership if needed
 
 ```bash
-# Создайте директорию для данных
-sudo mkdir -p /mnt/storage/ucx
-
-# Установите владельца
-sudo chown $USER:$USER /mnt/storage/ucx
-
-# Проверьте права
-ls -ld /mnt/storage/ucx
-# Должно быть: drwxr-xr-x ... your_user your_user ... /mnt/storage/ucx
+sudo chown -R $USER:$USER /ucdata
+sudo chmod -R 755 /ucdata
 ```
 
----
+## Persistent mount via `fstab`
 
-## 🔄 Автоматическое монтирование при загрузке
-
-### Через UUID (рекомендуется)
+Get the UUID:
 
 ```bash
-# 1. Узнайте UUID диска
-sudo blkid /dev/sda1
-# Вывод: UUID="12345678-1234-1234-1234-123456789abc"
+sudo blkid /dev/sdX1
+```
 
-# 2. Добавьте в /etc/fstab
-echo "UUID=12345678-1234-1234-1234-123456789abc /mnt/storage ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
+Add to `/etc/fstab`:
 
-# 3. Проверьте
+```bash
+UUID=your-uuid /ucdata ext4 defaults,nofail 0 2
+```
+
+Apply and verify:
+
+```bash
 sudo mount -a
-df -h /mnt/storage
+df -h /ucdata
 ```
 
-### Через метку (альтернатива)
+## Monitoring available space
 
 ```bash
-# 1. Установите метку диска
-sudo e2label /dev/sda1 "UCX-Storage"
-
-# 2. Добавьте в /etc/fstab
-echo "LABEL=UCX-Storage /mnt/storage ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
-
-# 3. Проверьте
-sudo mount -a
+df -h /ucdata
+watch -n 1 'df -h /ucdata'
 ```
 
----
-
-## 📊 Мониторинг места на диске
-
-### Проверка свободного места
+## Safe removal
 
 ```bash
-# Общая информация
-df -h /mnt/storage
-
-# Детальная информация
-df -h /mnt/storage/ucx
-
-# Использование по директориям
-du -sh /mnt/storage/ucx/*
-```
-
-### Непрерывный мониторинг
-
-```bash
-# Обновление каждую секунду
-watch -n 1 'df -h /mnt/storage'
-
-# Или через UCXSync веб-интерфейс
-# http://localhost:8080
-```
-
----
-
-## 🛠️ Типичные операции
-
-### Проверка USB-SSD подключен
-
-```bash
-# Проверить что диск виден
-lsblk | grep sda
-
-# Проверить что смонтирован
-mount | grep /mnt/storage
-
-# Проверить свободное место
-df -h /mnt/storage
-```
-
-### Безопасное отключение USB-SSD
-
-```bash
-# 1. Остановите UCXSync (если запущен)
 sudo systemctl stop ucxsync
-
-# 2. Размонтируйте диск
-sudo umount /mnt/storage
-
-# 3. Теперь можно физически отключить USB-SSD
+sudo umount /ucdata
 ```
 
-### Подключение другого USB-SSD
+## Troubleshooting
+
+### Device busy
 
 ```bash
-# 1. Подключите новый USB-SSD
-
-# 2. Найдите устройство
-lsblk
-
-# 3. Смонтируйте (если другое устройство, например sdb1)
-sudo mount /dev/sdb1 /mnt/storage
-
-# 4. Проверьте
-df -h /mnt/storage
-
-# 5. Создайте директорию (если первое использование)
-sudo mkdir -p /mnt/storage/ucx
-sudo chown $USER:$USER /mnt/storage/ucx
+sudo lsof | grep /ucdata
+sudo fuser -m /ucdata
+sudo umount /ucdata
 ```
 
-### Копирование данных между USB-SSD
+### Wrong filesystem type
 
 ```bash
-# USB-SSD 1 → USB-SSD 2
-
-# 1. Подключите оба диска
-
-# 2. Смонтируйте первый
-sudo mount /dev/sda1 /mnt/storage
-
-# 3. Смонтируйте второй в другую точку
-sudo mkdir -p /mnt/storage2
-sudo mount /dev/sdb1 /mnt/storage2
-
-# 4. Копируйте данные
-sudo rsync -avh --progress /mnt/storage/ucx/ /mnt/storage2/ucx/
-
-# 5. Размонтируйте
-sudo umount /mnt/storage
-sudo umount /mnt/storage2
+sudo blkid /dev/sdX1
+sudo mount -t ntfs-3g /dev/sdX1 /ucdata
 ```
 
----
-
-## ⚠️ Решение проблем
-
-### Проблема: "device is busy"
+### Permission denied
 
 ```bash
-# Найдите процессы использующие диск
-sudo lsof | grep /mnt/storage
-
-# Или
-sudo fuser -m /mnt/storage
-
-# Убейте процессы (осторожно!)
-sudo fuser -km /mnt/storage
-
-# Теперь размонтируйте
-sudo umount /mnt/storage
+sudo chown -R $USER:$USER /ucdata
+sudo chmod -R 755 /ucdata
 ```
 
-### Проблема: "mount: wrong fs type"
+## Recommended paths summary
 
-```bash
-# Проверьте файловую систему
-sudo blkid /dev/sda1
-
-# Если NTFS, установите драйвер
-sudo apt install ntfs-3g
-
-# Смонтируйте заново
-sudo mount -t ntfs-3g /dev/sda1 /mnt/storage
-```
-
-### Проблема: "permission denied" при записи
-
-```bash
-# Проверьте владельца
-ls -ld /mnt/storage/ucx
-
-# Исправьте
-sudo chown -R $USER:$USER /mnt/storage/ucx
-sudo chmod -R 755 /mnt/storage/ucx
-```
-
-### Проблема: диск не определяется
-
-```bash
-# Проверьте что диск подключен
-dmesg | tail -20
-
-# Проверьте USB порты
-lsusb
-
-# Попробуйте другой USB порт
-# Попробуйте другой USB кабель
-```
-
-### Проблема: медленная скорость
-
-```bash
-# Проверьте скорость USB порта
-lsusb -t
-
-# Убедитесь что используется USB 3.0+
-# Ищите "5000M" или "10000M" в выводе
-
-# Проверьте SMART статус SSD
-sudo smartctl -a /dev/sda
-```
-
----
-
-## 📈 Оценка необходимого места
-
-### Один снимок UCX:
-- **13 RAW файлов** (WU01-WU13): ~13 × 500 MB = 6.5 GB
-- **1 XML файл** (CU): ~5 MB
-- **Итого:** ~6.5 GB на снимок
-
-### Проект на месяц:
-- **Снимков в день:** ~10-20
-- **Дней:** 30
-- **Итого:** ~2-4 TB
-
-### Рекомендации:
-- **500 GB USB-SSD:** для тестов и небольших проектов (60-80 снимков)
-- **1 TB USB-SSD:** для среднего проекта на месяц (150-200 снимков)
-- **2 TB USB-SSD:** для крупного проекта или нескольких проектов (300+ снимков)
-
----
-
-## 🎯 Лучшие практики
-
-### ✅ DO:
-- Используйте ext4 для максимальной совместимости с Linux
-- Устанавливайте метки на диски (LABEL) для идентификации
-- Регулярно проверяйте SMART статус SSD
-- Делайте резервные копии важных данных
-- Используйте USB 3.1+ порты
-- Безопасно извлекайте диск (umount перед отключением)
-
-### ❌ DON'T:
-- Не отключайте USB-SSD во время синхронизации
-- Не используйте USB хабы без питания
-- Не храните единственную копию данных
-- Не игнорируйте ошибки файловой системы
-- Не используйте старые USB 2.0 диски
-
----
-
-## 📚 Полезные команды
-
-```bash
-# Информация о всех дисках
-lsblk -f
-
-# Детальная информация о диске
-sudo hdparm -I /dev/sda
-
-# Тест скорости чтения
-sudo hdparm -t /dev/sda
-
-# SMART статус
-sudo smartctl -a /dev/sda
-
-# Проверка файловой системы
-sudo fsck /dev/sda1
-
-# Переименование метки
-sudo e2label /dev/sda1 "NewLabel"
-
-# Узнать UUID
-sudo blkid /dev/sda1
-
-# Список смонтированных дисков
-mount | grep sd
-```
-
----
-
-## 🔗 См. также
-
-- **`STORAGE-ARCHITECTURE.md`** - архитектура хранения данных
-- **`TESTING-ON-LAPTOP.md`** - инструкция по тестированию
-- **`CHEATSHEET.md`** - быстрая шпаргалка
-
----
-
-**Итого:** USB-SSD - это ваше портативное хранилище для данных UCXSync. Правильная настройка гарантирует быструю и надёжную работу.
+- USB-SSD mount: `/ucdata`
+- UCX network shares: `/ucmount`

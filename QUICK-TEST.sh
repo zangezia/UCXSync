@@ -107,29 +107,29 @@ fi
 # Создаем директории
 echo ""
 echo "=== Creating directories ==="
-sudo mkdir -p /mnt/storage /mnt/ucx
-echo "✓ Created /mnt/storage (USB-SSD mount point)"
-echo "✓ Created /mnt/ucx (UCX network mount points)"
+sudo mkdir -p /ucdata /ucmount
+echo "✓ Created /ucdata (USB-SSD mount point)"
+echo "✓ Created /ucmount (UCX network mount points)"
 
 # Проверяем USB-SSD
-if mountpoint -q /mnt/storage 2>/dev/null; then
-    echo "✓ /mnt/storage is already mounted"
+if mountpoint -q /ucdata 2>/dev/null; then
+    echo "✓ /ucdata is already mounted"
     
     # Устанавливаем права на весь диск
-    sudo chown -R $USER:$USER /mnt/storage
-    echo "✓ Permissions set for /mnt/storage"
+    sudo chown -R $USER:$USER /ucdata
+    echo "✓ Permissions set for /ucdata"
     
     # Показываем информацию о диске
-    STORAGE_INFO=$(df -h /mnt/storage 2>/dev/null | tail -1 | awk '{print $2 " total, " $4 " free"}')
+    STORAGE_INFO=$(df -h /ucdata 2>/dev/null | tail -1 | awk '{print $2 " total, " $4 " free"}')
     echo "Storage: $STORAGE_INFO"
 else
-    echo "⚠ /mnt/storage is NOT mounted"
+    echo "⚠ /ucdata is NOT mounted"
     echo ""
     echo "USB-SSD is required for UCXSync!"
     echo ""
     echo "Option 1 - Quick manual mount:"
     echo "  1. lsblk                              # find your USB-SSD (e.g., sda1)"
-    echo "  2. sudo mount /dev/sda1 /mnt/storage  # mount it"
+    echo "  2. sudo mount /dev/sda1 /ucdata  # mount it"
     echo ""
     echo "Option 2 - Auto-mount setup (recommended):"
     echo "  sudo ./setup-usb-automount.sh"
@@ -155,7 +155,7 @@ echo "OS: $(lsb_release -ds 2>/dev/null || cat /etc/os-release | grep PRETTY_NAM
 echo "Kernel: $(uname -r)"
 echo "CPU: $(lscpu | grep "Model name" | cut -d':' -f2 | xargs)"
 echo "RAM: $(free -h | awk '/^Mem:/ {print $2}')"
-echo "Disk: $(df -h /mnt/storage | awk 'NR==2 {print $2 " total, " $4 " free"}')"
+echo "Disk: $(df -h /ucdata | awk 'NR==2 {print $2 " total, " $4 " free"}')"
 
 # Устанавливаем cifs-utils если нужно
 echo ""
@@ -180,16 +180,15 @@ echo "================================================================"
 echo ""
 
 # Проверка USB-SSD
-if ! mountpoint -q /mnt/storage 2>/dev/null; then
+if ! mountpoint -q /ucdata 2>/dev/null; then
     echo "⚠ WARNING: USB-SSD is NOT mounted!"
     echo ""
-    echo "UCXSync requires USB-SSD at /mnt/storage"
+    echo "UCXSync requires USB-SSD at /ucdata"
     echo ""
     echo "Mount your USB-SSD:"
     echo "  1. lsblk"
-    echo "  2. sudo mount /dev/sdX1 /mnt/storage"
-    echo "  3. sudo mkdir -p /mnt/storage/ucx"
-    echo "  4. sudo chown -R \$USER:\$USER /mnt/storage/ucx"
+    echo "  2. sudo mount /dev/sdX1 /ucdata"
+    echo "  3. sudo chown -R \$USER:\$USER /ucdata"
     echo ""
     echo "See: USB-SSD-GUIDE.md"
     echo ""
