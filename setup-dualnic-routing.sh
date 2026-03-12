@@ -17,6 +17,7 @@ END1_SRC_IP="${END1_SRC_IP:-192.168.200.102}"
 END0_HOSTS_RAW="${END0_HOSTS:-1 2 3 4 5 6 7}"
 END1_HOSTS_RAW="${END1_HOSTS:-8 9 10 11 12 13 201}"
 IP_PREFIX="${IP_PREFIX:-192.168.200}"
+IP_WAIT_TIMEOUT="${IP_WAIT_TIMEOUT:-30}"
 
 DRY_RUN=0
 MODE="apply"
@@ -128,6 +129,32 @@ require_interface() {
     ip link show dev "$iface" >/dev/null 2>&1 || die "interface not found: $iface"
 }
 
+interface_has_ip() {
+    local iface="$1"
+    local ip_addr="$2"
+
+    ip -4 -o addr show dev "$iface" | grep -Fq " $ip_addr/"
+}
+
+wait_for_interface_ip() {
+    local iface="$1"
+    local ip_addr="$2"
+    local timeout="$3"
+    local elapsed=0
+
+    while (( elapsed < timeout )); do
+        if interface_has_ip "$iface" "$ip_addr"; then
+            log "Confirmed IP $ip_addr on $iface"
+            return 0
+        fi
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    return 1
+}
+
 print_config() {
     cat <<EOF
 Configuration:
@@ -194,7 +221,13 @@ apply_route_group() {
         [[ -n "$host" ]] || continue
         ip=$(normalize_ip "$host")
         log "Routing $ip/32 via $iface (src $src_ip)"
-        run_cmd ip route replace "$ip/32" dev "$iface" src "$src_ip"
+
+        if interface_has_ip "$iface" "$src_ip"; then
+            run_cmd ip route replace "$ip/32" dev "$iface" src "$src_ip"
+        else
+            warn "IP $src_ip is not assigned to $iface yet; applying route without explicit src"
+            run_cmd ip route replace "$ip/32" dev "$iface"
+        fi
     done
 }
 
@@ -360,12 +393,24 @@ main() {
 
     case "$MODE" in
         apply)
+            if ! wait_for_interface_ip "$END0_IFACE" "$END0_SRC_IP" "$IP_WAIT_TIMEOUT"; then
+                warn "Timed out waiting for $END0_SRC_IP on $END0_IFACE"
+            fi
+            if ! wait_for_interface_ip "$END1_IFACE" "$END1_SRC_IP" "$IP_WAIT_TIMEOUT"; then
+                warn "Timed out waiting for $END1_SRC_IP on $END1_IFACE"
+            fi
             apply_runtime_sysctl
             apply_route_group "$END0_IFACE" "$END0_SRC_IP" "${END0_HOSTS_ARRAY[@]}"
             apply_route_group "$END1_IFACE" "$END1_SRC_IP" "${END1_HOSTS_ARRAY[@]}"
             verify_routes
             ;;
         install)
+            if ! wait_for_interface_ip "$END0_IFACE" "$END0_SRC_IP" "$IP_WAIT_TIMEOUT"; then
+                warn "Timed out waiting for $END0_SRC_IP on $END0_IFACE"
+            fi
+            if ! wait_for_interface_ip "$END1_IFACE" "$END1_SRC_IP" "$IP_WAIT_TIMEOUT"; then
+                warn "Timed out waiting for $END1_SRC_IP on $END1_IFACE"
+            fi
             apply_runtime_sysctl
             apply_route_group "$END0_IFACE" "$END0_SRC_IP" "${END0_HOSTS_ARRAY[@]}"
             apply_route_group "$END1_IFACE" "$END1_SRC_IP" "${END1_HOSTS_ARRAY[@]}"
