@@ -40,6 +40,13 @@ class UCXSyncApp {
         this.diskValue = document.getElementById('disk-value');
         this.networkProgress = document.getElementById('network-progress');
         this.networkValue = document.getElementById('network-value');
+        this.networkPrimaryLabel = document.getElementById('network-primary-label');
+        this.networkPrimaryProgress = document.getElementById('network-primary-progress');
+        this.networkPrimaryValue = document.getElementById('network-primary-value');
+        this.networkSecondaryLabel = document.getElementById('network-secondary-label');
+        this.networkSecondaryProgress = document.getElementById('network-secondary-progress');
+        this.networkSecondaryValue = document.getElementById('network-secondary-value');
+        this.cpuTemperatureValue = document.getElementById('cpu-temperature-value');
         this.freeDiskEl = document.getElementById('free-disk');
 
         // Activity table
@@ -331,6 +338,22 @@ class UCXSyncApp {
         this.cpuProgress.style.width = `${cpuPercent}%`;
         this.cpuValue.textContent = `${cpuPercent}%`;
 
+        if (metrics.cpu_temperature_available) {
+            const cpuTemp = Number(metrics.cpu_temperature_celsius || 0).toFixed(1);
+            this.cpuTemperatureValue.textContent = `${cpuTemp} °C`;
+
+            if (metrics.cpu_temperature_celsius >= 85) {
+                this.cpuTemperatureValue.style.color = 'var(--danger-color)';
+            } else if (metrics.cpu_temperature_celsius >= 70) {
+                this.cpuTemperatureValue.style.color = 'var(--warning-color)';
+            } else {
+                this.cpuTemperatureValue.style.color = 'var(--primary-color)';
+            }
+        } else {
+            this.cpuTemperatureValue.textContent = 'N/A';
+            this.cpuTemperatureValue.style.color = 'var(--text-secondary)';
+        }
+
         // Memory
         const memPercent = Math.round(metrics.memory_percent || 0);
         const memUsedGB = (metrics.memory_used_bytes / 1024 / 1024 / 1024).toFixed(1);
@@ -350,9 +373,64 @@ class UCXSyncApp {
         this.networkProgress.style.width = `${netPercent}%`;
         this.networkValue.textContent = `${netMBps} MB/s`;
 
+        const interfaceMetrics = this.selectNetworkInterfaces(metrics.network_interfaces || []);
+        this.updateNetworkInterfaceCard(
+            this.networkPrimaryLabel,
+            this.networkPrimaryProgress,
+            this.networkPrimaryValue,
+            interfaceMetrics[0],
+            'Сеть #1'
+        );
+        this.updateNetworkInterfaceCard(
+            this.networkSecondaryLabel,
+            this.networkSecondaryProgress,
+            this.networkSecondaryValue,
+            interfaceMetrics[1],
+            'Сеть #2'
+        );
+
         // Free disk
         const freeDiskGB = (metrics.free_disk_gb || 0).toFixed(1);
         this.freeDiskEl.textContent = `${freeDiskGB} GB`;
+    }
+
+    selectNetworkInterfaces(interfaces) {
+        const preferred = ['end0', 'end1'];
+        const selected = [];
+        const remaining = [...interfaces];
+
+        preferred.forEach(name => {
+            const index = remaining.findIndex(item => item.name === name);
+            if (index >= 0) {
+                selected.push(remaining[index]);
+                remaining.splice(index, 1);
+            }
+        });
+
+        remaining
+            .sort((a, b) => (b.bytes_per_sec || 0) - (a.bytes_per_sec || 0))
+            .forEach(item => {
+                if (selected.length < 2) {
+                    selected.push(item);
+                }
+            });
+
+        return selected.slice(0, 2);
+    }
+
+    updateNetworkInterfaceCard(labelEl, progressEl, valueEl, metric, fallbackLabel) {
+        if (!metric) {
+            labelEl.textContent = fallbackLabel;
+            progressEl.style.width = '0%';
+            valueEl.textContent = 'Нет данных';
+            return;
+        }
+
+        const percent = Math.min(100, Math.round(metric.percent || 0));
+        const mbps = Number(metric.mbps || 0).toFixed(2);
+        labelEl.textContent = `Сеть ${metric.name}`;
+        progressEl.style.width = `${percent}%`;
+        valueEl.textContent = `${mbps} MB/s`;
     }
 
     updateActivityTable(tasks) {

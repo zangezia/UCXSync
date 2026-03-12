@@ -41,20 +41,31 @@ type SyncStatus struct {
 	ActiveTasks           []SyncTask `json:"active_tasks"`
 }
 
+// NetworkInterfaceMetrics holds throughput data for a specific network interface.
+type NetworkInterfaceMetrics struct {
+	Name        string  `json:"name"`
+	BytesPerSec float64 `json:"bytes_per_sec"`
+	MBps        float64 `json:"mbps"`
+	Percent     float64 `json:"percent"`
+}
+
 // PerformanceMetrics holds system performance data
 type PerformanceMetrics struct {
-	CPUPercent         float64 `json:"cpu_percent"`
-	MemoryUsedBytes    uint64  `json:"memory_used_bytes"`
-	MemoryTotalBytes   uint64  `json:"memory_total_bytes"`
-	MemoryPercent      float64 `json:"memory_percent"`
-	DiskBytesPerSec    float64 `json:"disk_bytes_per_sec"`
-	DiskMBps           float64 `json:"disk_mbps"`
-	DiskPercent        float64 `json:"disk_percent"`
-	NetworkBytesPerSec float64 `json:"network_bytes_per_sec"`
-	NetworkMBps        float64 `json:"network_mbps"`
-	NetworkPercent     float64 `json:"network_percent"`
-	FreeDiskBytes      uint64  `json:"free_disk_bytes"`
-	FreeDiskGB         float64 `json:"free_disk_gb"`
+	CPUPercent              float64                   `json:"cpu_percent"`
+	CPUTemperatureCelsius   float64                   `json:"cpu_temperature_celsius"`
+	CPUTemperatureAvailable bool                      `json:"cpu_temperature_available"`
+	MemoryUsedBytes         uint64                    `json:"memory_used_bytes"`
+	MemoryTotalBytes        uint64                    `json:"memory_total_bytes"`
+	MemoryPercent           float64                   `json:"memory_percent"`
+	DiskBytesPerSec         float64                   `json:"disk_bytes_per_sec"`
+	DiskMBps                float64                   `json:"disk_mbps"`
+	DiskPercent             float64                   `json:"disk_percent"`
+	NetworkBytesPerSec      float64                   `json:"network_bytes_per_sec"`
+	NetworkMBps             float64                   `json:"network_mbps"`
+	NetworkPercent          float64                   `json:"network_percent"`
+	NetworkInterfaces       []NetworkInterfaceMetrics `json:"network_interfaces"`
+	FreeDiskBytes           uint64                    `json:"free_disk_bytes"`
+	FreeDiskGB              float64                   `json:"free_disk_gb"`
 }
 
 // ProjectInfo holds information about an available project

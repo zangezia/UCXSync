@@ -223,6 +223,7 @@ h2 {
     font-weight: bold;
     color: var(--primary-color);
     text-align: center;
+    min-height: 2.2rem;
 }
 
 /* Activity Table */
