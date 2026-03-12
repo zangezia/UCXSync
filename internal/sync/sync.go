@@ -170,23 +170,28 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 // Stop halts synchronization
 func (s *Service) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !s.isRunning {
+		s.mu.Unlock()
 		return
 	}
 
+	cancel := s.cancel
+	s.mu.Unlock()
+
 	log.Info().Msg("Stopping synchronization")
 
-	if s.cancel != nil {
-		s.cancel()
+	if cancel != nil {
+		cancel()
 	}
 
 	s.wg.Wait()
 
+	s.mu.Lock()
 	s.isRunning = false
+	s.cancel = nil
 	s.activeTasks = make(map[string]*taskInfo)
 	s.globalSemaphore = nil // Release semaphore
+	s.mu.Unlock()
 
 	log.Info().Msg("Synchronization stopped")
 }

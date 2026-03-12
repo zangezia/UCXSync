@@ -1,9 +1,11 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestGlobalSemaphore verifies that globalSemaphore limits concurrent operations
@@ -130,5 +132,59 @@ func TestTrackCaptureCompletionWithRawQv(t *testing.T) {
 
 	if got := atomic.LoadInt32(&svc.completedCaptures); got != 1 {
 		t.Fatalf("completedCaptures = %d, want 1", got)
+	}
+}
+
+func TestStopDoesNotDeadlockWhileTasksCleanup(t *testing.T) {
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	svc.mu.Lock()
+	svc.isRunning = true
+	svc.cancel = cancel
+	svc.globalSemaphore = make(chan struct{}, 1)
+	svc.activeTasks["WU01-E$"] = &taskInfo{node: "WU01", share: "E$"}
+	svc.mu.Unlock()
+
+	svc.wg.Add(1)
+	go func() {
+		defer svc.wg.Done()
+		<-ctx.Done()
+
+		// Simulate the same cleanup path as startSyncTask defer.
+		svc.mu.Lock()
+		delete(svc.activeTasks, "WU01-E$")
+		svc.mu.Unlock()
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() timed out; possible deadlock while waiting for task cleanup")
+	}
+
+	svc.mu.RLock()
+	defer svc.mu.RUnlock()
+
+	if svc.isRunning {
+		t.Fatal("expected sync service to be stopped")
+	}
+
+	if svc.cancel != nil {
+		t.Fatal("expected cancel func to be cleared after Stop")
+	}
+
+	if svc.globalSemaphore != nil {
+		t.Fatal("expected semaphore to be released after Stop")
+	}
+
+	if len(svc.activeTasks) != 0 {
+		t.Fatalf("expected activeTasks to be empty after Stop, got %d", len(svc.activeTasks))
 	}
 }
