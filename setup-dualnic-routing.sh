@@ -6,6 +6,8 @@ SCRIPT_NAME=$(basename "$0")
 INSTALL_PATH="/usr/local/sbin/ucxsync-dualnic-routing.sh"
 SERVICE_PATH="/etc/systemd/system/ucxsync-dualnic-routing.service"
 SYSCTL_PATH="/etc/sysctl.d/99-ucxsync-dualnic.conf"
+UCXSYNC_DROPIN_DIR="/etc/systemd/system/ucxsync.service.d"
+UCXSYNC_DROPIN_PATH="$UCXSYNC_DROPIN_DIR/10-dualnic-routing.conf"
 
 # Override via environment if needed.
 END0_IFACE="${END0_IFACE:-end0}"
@@ -243,6 +245,7 @@ install_service() {
 Description=UCXSync dual-NIC routing setup
 After=network-online.target
 Wants=network-online.target
+Before=ucxsync.service
 
 [Service]
 Type=oneshot
@@ -250,14 +253,21 @@ Environment=END0_IFACE=$END0_IFACE
 Environment=END1_IFACE=$END1_IFACE
 Environment=END0_SRC_IP=$END0_SRC_IP
 Environment=END1_SRC_IP=$END1_SRC_IP
-Environment=END0_HOSTS=$END0_HOSTS_RAW
-Environment=END1_HOSTS=$END1_HOSTS_RAW
+Environment="END0_HOSTS=$END0_HOSTS_RAW"
+Environment="END1_HOSTS=$END1_HOSTS_RAW"
 Environment=IP_PREFIX=$IP_PREFIX
 ExecStart=$INSTALL_PATH --apply
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
+EOF
+
+        cat <<EOF
+[dry-run] would write $UCXSYNC_DROPIN_PATH
+[Unit]
+Wants=ucxsync-dualnic-routing.service
+After=ucxsync-dualnic-routing.service
 EOF
         return 0
     fi
@@ -267,6 +277,7 @@ EOF
 Description=UCXSync dual-NIC routing setup
 After=network-online.target
 Wants=network-online.target
+Before=ucxsync.service
 
 [Service]
 Type=oneshot
@@ -274,14 +285,22 @@ Environment=END0_IFACE=$END0_IFACE
 Environment=END1_IFACE=$END1_IFACE
 Environment=END0_SRC_IP=$END0_SRC_IP
 Environment=END1_SRC_IP=$END1_SRC_IP
-Environment=END0_HOSTS=$END0_HOSTS_RAW
-Environment=END1_HOSTS=$END1_HOSTS_RAW
+Environment="END0_HOSTS=$END0_HOSTS_RAW"
+Environment="END1_HOSTS=$END1_HOSTS_RAW"
 Environment=IP_PREFIX=$IP_PREFIX
 ExecStart=$INSTALL_PATH --apply
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
+EOF
+
+    log "Writing UCXSync ordering drop-in to $UCXSYNC_DROPIN_PATH"
+    run_cmd mkdir -p "$UCXSYNC_DROPIN_DIR"
+    cat > "$UCXSYNC_DROPIN_PATH" <<EOF
+[Unit]
+Wants=ucxsync-dualnic-routing.service
+After=ucxsync-dualnic-routing.service
 EOF
 
     run_cmd systemctl daemon-reload
@@ -305,6 +324,9 @@ remove_installation() {
     fi
     if [[ -f "$SYSCTL_PATH" ]]; then
         run_cmd rm -f "$SYSCTL_PATH"
+    fi
+    if [[ -f "$UCXSYNC_DROPIN_PATH" ]]; then
+        run_cmd rm -f "$UCXSYNC_DROPIN_PATH"
     fi
 
     if [[ "$DRY_RUN" -eq 0 ]]; then
