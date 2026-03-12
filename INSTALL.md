@@ -36,7 +36,7 @@ go version
 ```bash
 # Clone repository
 git clone https://github.com/zangezia/UCXSync.git
-cd UCXSync
+
 
 # Make install script executable
 chmod +x install.sh
