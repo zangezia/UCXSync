@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -13,6 +15,7 @@ type Config struct {
 	Nodes       []string    `mapstructure:"nodes"`
 	Shares      []string    `mapstructure:"shares"`
 	Credentials Credentials `mapstructure:"credentials"`
+	Network     Network     `mapstructure:"network"`
 	Sync        Sync        `mapstructure:"sync"`
 	Web         Web         `mapstructure:"web"`
 	Monitoring  Monitoring  `mapstructure:"monitoring"`
@@ -23,6 +26,11 @@ type Config struct {
 type Credentials struct {
 	Username string `mapstructure:"username"`
 	Password string `mapstructure:"password"`
+}
+
+// Network holds CIFS mount settings
+type Network struct {
+	MountRoot string `mapstructure:"mount_root"`
 }
 
 // Sync holds synchronization settings
@@ -116,6 +124,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("credentials.username", "Administrator")
 	v.SetDefault("credentials.password", "ultracam")
 
+	// Network defaults
+	v.SetDefault("network.mount_root", "/ucmount")
+
 	// Sync defaults
 	v.SetDefault("sync.max_parallelism", 8)
 	v.SetDefault("sync.service_loop_interval", "10s")
@@ -149,6 +160,19 @@ func (c *Config) Validate() error {
 
 	if len(c.Shares) == 0 {
 		return fmt.Errorf("no shares configured")
+	}
+
+	c.Network.MountRoot = path.Clean(strings.TrimSpace(c.Network.MountRoot))
+	if c.Network.MountRoot == "." || c.Network.MountRoot == "" {
+		return fmt.Errorf("network.mount_root must not be empty")
+	}
+
+	if !strings.HasPrefix(c.Network.MountRoot, "/") {
+		return fmt.Errorf("network.mount_root must be an absolute path: %s", c.Network.MountRoot)
+	}
+
+	if c.Network.MountRoot == "/" {
+		return fmt.Errorf("network.mount_root must not be /")
 	}
 
 	if c.Sync.MaxParallelism < 1 {

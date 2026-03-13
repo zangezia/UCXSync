@@ -36,6 +36,7 @@ go version
 ```bash
 # Clone repository
 git clone https://github.com/zangezia/UCXSync.git
+cd UCXSync
 
 
 # Make install script executable
@@ -45,6 +46,23 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
+By default, the installer keeps backward compatibility and installs the **main single-instance version**.
+
+You can explicitly choose the installation mode:
+
+```bash
+# Main version (single instance)
+sudo ./install.sh --single
+
+# Dual version (two instances: ucxsync@a + ucxsync@b)
+sudo ./install.sh --dual
+
+# Equivalent explicit form
+sudo ./install.sh --mode dual
+```
+
+When run interactively without flags, the script will ask which version to install.
+
 The script will:
 - Check and install prerequisites
 - Build the application
@@ -52,8 +70,23 @@ The script will:
 - Install binary to `/opt/ucxsync/`
 - Install web assets to `/opt/ucxsync/web/`
 - Configure network hosts mapping in `/etc/hosts` (192.168.200.1-13, 201)
-- Install systemd service
-- Set up configuration
+- Install systemd service(s)
+- Set up configuration for the selected mode
+
+In **single** mode it installs:
+
+- `/etc/ucxsync/config.yaml`
+- `/etc/systemd/system/ucxsync.service`
+- mount root `/ucmount`
+
+In **dual** mode it installs:
+
+- `/etc/ucxsync/a.yaml`
+- `/etc/ucxsync/b.yaml`
+- `/etc/systemd/system/ucxsync.service`
+- `/etc/systemd/system/ucxsync@.service`
+- mount roots `/ucmount-a` and `/ucmount-b`
+- helper `/opt/ucxsync/setup-dualnic-routing.sh`
 
 ### Method 2: Manual Installation
 
@@ -138,6 +171,161 @@ UCXSync automatically mounts network shares on startup. The mount structure:
     └── F/
 ```
 
+### Two-instance deployment scheme
+
+For legacy SMB1 sources, the recommended scaling model is **two independent UCXSync instances**.
+
+Recommended split:
+
+- **Instance A**
+  - nodes: `WU01`-`WU07`
+  - interface: `end0`
+  - mount root: `/ucmount-a`
+  - web UI: `:8080`
+  - log file: `/var/log/ucxsync/ucxsync-a.log`
+- **Instance B**
+  - nodes: `WU08`-`WU13` and `CU`
+  - interface: `end1`
+  - mount root: `/ucmount-b`
+  - web UI: `:8081`
+  - log file: `/var/log/ucxsync/ucxsync-b.log`
+
+Both instances may write to the same destination, for example `/ucdata`, but they must use different:
+
+- `nodes`
+- `network.mount_root`
+- `web.port`
+- `logging.file`
+
+### Principle of operation
+
+```text
+WU01..WU07 ----> end0 ----> host routes ----> UCXSync A ----> /ucmount-a ---->
+                                                                     copy ----> /ucdata
+
+WU08..WU13 ----> end1 ----> host routes ----> UCXSync B ----> /ucmount-b ---->
+CU -----------/                                                      copy ----> /ucdata
+```
+
+This model helps because:
+
+1. each process mounts and scans only half of the UCX estate;
+2. traffic is pinned to the intended NIC by host routes;
+3. each process has its own worker pool and restart lifecycle;
+4. mount trees are isolated, so the two instances do not fight over `/ucmount`.
+
+### Recommended filesystem and service layout
+
+```text
+/opt/ucxsync/
+├── ucxsync
+└── web/
+
+/etc/ucxsync/
+├── a.yaml
+├── b.yaml
+└── config.yaml        # optional legacy single-instance config
+
+/etc/systemd/system/
+├── ucxsync@.service
+├── ucxsync-dualnic-routing.service
+├── ucxsync.service.d/
+│   └── 10-dualnic-routing.conf
+└── ucxsync@.service.d/
+    └── 10-dualnic-routing.conf
+
+/ucmount-a/
+/ucmount-b/
+/ucdata/
+```
+
+### Step-by-step dual-instance deployment
+
+1. Install the dual version directly:
+
+```bash
+sudo ./install.sh --dual
+```
+
+If you already ran the default installation, you can re-run the installer in dual mode safely; existing configs are not overwritten.
+
+2. Create separate mount roots:
+
+```bash
+sudo mkdir -p /ucmount-a /ucmount-b /var/log/ucxsync
+```
+
+3. Install the example instance configs:
+
+```bash
+sudo cp config.instance-a.yaml /etc/ucxsync/a.yaml
+sudo cp config.instance-b.yaml /etc/ucxsync/b.yaml
+sudo chmod 600 /etc/ucxsync/a.yaml /etc/ucxsync/b.yaml
+```
+
+4. Edit them and verify:
+
+```bash
+sudo nano /etc/ucxsync/a.yaml
+sudo nano /etc/ucxsync/b.yaml
+```
+
+Check that:
+
+- `a.yaml` uses `/ucmount-a` and port `8080`
+- `b.yaml` uses `/ucmount-b` and port `8081`
+- node lists do not overlap
+- log files are different
+
+5. Install the template unit:
+
+```bash
+sudo cp ucxsync@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+6. Install dual-NIC routing before starting the instances:
+
+```bash
+sudo END0_IFACE=end0 \
+     END1_IFACE=end1 \
+     END0_SRC_IP=192.168.200.101 \
+     END1_SRC_IP=192.168.200.102 \
+     END0_HOSTS="1 2 3 4 5 6 7" \
+     END1_HOSTS="8 9 10 11 12 13 201" \
+  /opt/ucxsync/setup-dualnic-routing.sh --install
+```
+
+The helper installs host routes and creates systemd ordering for both `ucxsync.service` and `ucxsync@.service`.
+
+7. Enable both instances:
+
+```bash
+sudo systemctl enable --now ucxsync@a
+sudo systemctl enable --now ucxsync@b
+```
+
+8. Verify everything:
+
+```bash
+sudo systemctl status ucxsync-dualnic-routing.service
+sudo systemctl status ucxsync@a
+sudo systemctl status ucxsync@b
+
+ip route get 192.168.200.1
+ip route get 192.168.200.8
+ip route get 192.168.200.201
+
+mount | grep -E '/ucmount-a|/ucmount-b'
+```
+
+Expected result:
+
+- nodes `1..7` route through `end0`
+- nodes `8..13` and `201` route through `end1`
+- instance A mounts only under `/ucmount-a`
+- instance B mounts only under `/ucmount-b`
+
 ## Running the Application
 
 ### Start Service
@@ -153,6 +341,17 @@ sudo systemctl start ucxsync
 sudo systemctl status ucxsync
 ```
 
+### Start two-instance deployment
+
+```bash
+sudo systemctl enable --now ucxsync-dualnic-routing.service
+sudo systemctl enable --now ucxsync@a
+sudo systemctl enable --now ucxsync@b
+
+sudo systemctl status ucxsync@a
+sudo systemctl status ucxsync@b
+```
+
 ### View Logs
 
 ```bash
@@ -164,6 +363,16 @@ sudo journalctl -u ucxsync -n 100
 
 # Application logs
 sudo tail -f /var/log/ucxsync/ucxsync.log
+```
+
+For split deployment:
+
+```bash
+sudo journalctl -u ucxsync@a -f
+sudo journalctl -u ucxsync@b -f
+
+sudo tail -f /var/log/ucxsync/ucxsync-a.log
+sudo tail -f /var/log/ucxsync/ucxsync-b.log
 ```
 
 ### Manual Operation
@@ -183,6 +392,13 @@ sudo /opt/ucxsync/ucxsync mount
 
 # Unmount shares
 sudo /opt/ucxsync/ucxsync unmount
+```
+
+Run a specific instance manually:
+
+```bash
+sudo /opt/ucxsync/ucxsync --config /etc/ucxsync/a.yaml
+sudo /opt/ucxsync/ucxsync --config /etc/ucxsync/b.yaml
 ```
 
 ## Accessing the Web Interface
@@ -214,6 +430,16 @@ sudo journalctl -u ucxsync -xe
 sudo /opt/ucxsync/ucxsync --config /etc/ucxsync/config.yaml --debug
 ```
 
+For template instances:
+
+```bash
+sudo systemctl status ucxsync@a
+sudo systemctl status ucxsync@b
+sudo journalctl -u ucxsync@a -n 100
+sudo journalctl -u ucxsync@b -n 100
+sudo systemctl status ucxsync-dualnic-routing.service
+```
+
 ### Cannot mount shares
 
 ```bash
@@ -225,6 +451,13 @@ sudo mount -t cifs //WU01/E /mnt/test -o username=Administrator,password=ultraca
 
 # Check network connectivity
 ping WU01
+```
+
+For split deployment, also verify both mount roots:
+
+```bash
+ls -la /ucmount-a
+ls -la /ucmount-b
 ```
 
 ### Permission denied errors
@@ -276,6 +509,18 @@ sudo cp ucxsync /opt/ucxsync/
 sudo systemctl start ucxsync
 ```
 
+For two instances:
+
+```bash
+cd UCXSync
+git pull
+go build -o ucxsync ./cmd/ucxsync
+sudo systemctl stop ucxsync@a ucxsync@b
+sudo cp ucxsync /opt/ucxsync/
+sudo cp -r web /opt/ucxsync/
+sudo systemctl start ucxsync@a ucxsync@b
+```
+
 ### Update Configuration
 
 ```bash
@@ -297,9 +542,33 @@ cd UCXSync
 # Make uninstall script executable
 chmod +x uninstall.sh
 
-# Run uninstallation
+# Remove only the main single-instance deployment (default)
 sudo ./uninstall.sh
+
+# Remove only the dual deployment
+sudo ./uninstall.sh --dual
+
+# Remove everything
+sudo ./uninstall.sh --all
 ```
+
+Available modes:
+
+- `--single` — remove only the main single-instance deployment
+- `--dual` — remove only the dual deployment (`ucxsync@a`, `ucxsync@b`, dual-NIC helper)
+- `--all` — remove all deployments plus shared files in `/opt/ucxsync`
+
+If you are **testing the dual version on a host that already has the single version**, you do **not** need a full uninstall first.
+
+Usually it is enough to:
+
+```bash
+sudo systemctl stop ucxsync
+sudo systemctl disable ucxsync
+sudo ./install.sh --dual
+```
+
+Use a full uninstall only if you want a completely clean machine or want to remove old configs and mount roots.
 
 Or manually:
 
@@ -320,6 +589,18 @@ sudo systemctl daemon-reload
 # Optionally remove config and mounts
 sudo rm -rf /etc/ucxsync
 sudo rm -rf /ucmount
+```
+
+For two instances:
+
+```bash
+sudo systemctl stop ucxsync@a ucxsync@b
+sudo systemctl disable ucxsync@a ucxsync@b
+sudo systemctl disable --now ucxsync-dualnic-routing.service
+sudo rm -f /etc/systemd/system/ucxsync@.service
+sudo rm -rf /etc/systemd/system/ucxsync@.service.d
+sudo rm -rf /ucmount-a /ucmount-b
+sudo systemctl daemon-reload
 ```
 
 ## Security Considerations
@@ -364,6 +645,26 @@ monitoring:
   performance_update_interval: 5s
   ui_update_interval: 5s
 ```
+
+### For dual-instance SMB1 deployments
+
+Use this as a starting point for each instance:
+
+```yaml
+sync:
+  max_parallelism: 4
+
+network:
+  mount_root: /ucmount-a   # second instance uses /ucmount-b
+
+web:
+  port: 8080               # second instance uses 8081
+
+logging:
+  file: /var/log/ucxsync/ucxsync-a.log
+```
+
+Tune each instance separately instead of trying to force one process to consume both NICs efficiently over SMB1.
 
 ## Support
 

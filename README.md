@@ -43,7 +43,7 @@ The codebase can be built on non-Linux hosts for development, but the full runti
 ## How it works
 
 1. Load config from `config.yaml` or built-in defaults.
-2. Optionally mount remote shares under `/ucmount`.
+2. Optionally mount remote shares under the configured `network.mount_root` (default: `/ucmount`).
 3. Start the web server.
 4. When synchronization starts, scan mounted project directories.
 5. Copy only missing or modified files into the target destination.
@@ -103,6 +103,7 @@ Use `config.example.yaml` as the source of truth. The currently supported top-le
 - `nodes`
 - `shares`
 - `credentials`
+- `network`
 - `sync`
 - `web`
 - `monitoring`
@@ -135,6 +136,9 @@ credentials:
   username: Administrator
   password: ultracam
 
+network:
+  mount_root: /ucmount
+
 sync:
   project: Arh2k_mezen_200725
   destination: /ucdata
@@ -161,6 +165,13 @@ logging:
   max_backups: 5
   max_age: 30
 ```
+
+For split-load deployments, run two instances with:
+
+- different `nodes` subsets;
+- different `network.mount_root` values (for example `/ucmount-a` and `/ucmount-b`);
+- different `web.port` values;
+- different log files.
 
 ## HTTP and WebSocket API
 
@@ -248,7 +259,6 @@ go build ./cmd/ucxsync
 
 ## Current limitations
 
-- mount root is hard-coded to `/ucmount` in several places;
 - free-space enforcement is not implemented yet in the sync service;
 - block-device and mount operations are Linux-specific and shell out to system tools;
 - the C++ port is experimental and not part of the runtime path.

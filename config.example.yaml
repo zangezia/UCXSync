@@ -27,6 +27,10 @@ credentials:
   username: Administrator
   password: ultracam
 
+# Network share mounting
+network:
+  mount_root: "/ucmount"           # Change per instance, e.g. /ucmount-a and /ucmount-b
+
 # Synchronization settings
 sync:
   project: "Arh2k_mezen_200725"      # Project name (used in file paths)
@@ -58,5 +62,5 @@ logging:
   max_age: 30       # days
 
 # Notes:
-# - Network shares are currently mounted under /ucmount in code.
+# - For two UCXSync instances, assign each instance its own network.mount_root and web.port.
 # - Block-device management in the web UI also assumes Linux system tools.

@@ -41,7 +41,7 @@ broadcast status + metrics to browser clients
 - System tools: `mount`, `umount`, `mount.cifs`, `lsblk`
 - Filesystem interfaces used directly:
   - `/proc/mounts`
-  - `/ucmount`
+  - configured `network.mount_root` (default: `/ucmount`)
   - `/ucdata` (default removable-storage mount target in the web UI)
 
 The Go application can be built on Windows, but the operational feature set is Linux-only because network mounting and block-device management depend on Linux system interfaces.
@@ -93,7 +93,7 @@ Responsibilities:
 - validate essential fields (`nodes`, `shares`, `web.port`, `sync.max_parallelism`);
 - persist lightweight UI settings via `SaveSettings()` / `LoadSettings()`.
 
-Important detail: the current runtime configuration does **not** expose a configurable `network.base_mount_dir`; code still uses `/ucmount` directly.
+Important detail: the runtime configuration exposes `network.mount_root`, so multiple UCXSync instances can mount shares into separate directory trees.
 
 ### `internal/network`
 
@@ -101,7 +101,7 @@ Linux-specific mount manager for worker-node shares.
 
 Responsibilities:
 
-- create local mount directory layout under `/ucmount/{node}/{share}`;
+- create local mount directory layout under `{network.mount_root}/{node}/{share}`;
 - write `/etc/ucxsync/credentials` when possible;
 - mount shares using `mount -t cifs` with SMB1 compatibility (`vers=1.0`);
 - track mounted shares in memory for later unmount;
@@ -225,7 +225,6 @@ periodic broadcast to all websocket clients
 
 ## Current gaps and technical debt
 
-- mount root (`/ucmount`) is hard-coded in multiple places;
 - disk-space enforcement is not implemented yet;
 - Linux assumptions are spread through `network` and `web` code;
 - mount and block-device actions call external commands directly, which makes unit testing harder;

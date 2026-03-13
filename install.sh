@@ -12,9 +12,128 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+INSTALL_MODE="single"
+MODE_EXPLICIT=0
+
+usage() {
+    cat <<EOF
+Usage:
+  sudo ./install.sh [--single | --dual | --mode single|dual]
+
+Modes:
+  --single           Install the main single-instance deployment (default)
+  --dual             Install the dual deployment (ucxsync@a + ucxsync@b)
+  --mode <value>     Explicitly choose 'single' or 'dual'
+  -h, --help         Show this help
+
+Behavior:
+  - In interactive mode, the script asks which version to install if no flag is given.
+  - In non-interactive mode, single-instance installation is used by default.
+EOF
+}
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --single)
+                INSTALL_MODE="single"
+                MODE_EXPLICIT=1
+                ;;
+            --dual)
+                INSTALL_MODE="dual"
+                MODE_EXPLICIT=1
+                ;;
+            --mode)
+                shift
+                if [ $# -eq 0 ]; then
+                    echo -e "${RED}Error: --mode requires a value (single or dual)${NC}"
+                    exit 1
+                fi
+                case "$1" in
+                    single|dual)
+                        INSTALL_MODE="$1"
+                        MODE_EXPLICIT=1
+                        ;;
+                    *)
+                        echo -e "${RED}Error: invalid mode '$1'. Use 'single' or 'dual'${NC}"
+                        exit 1
+                        ;;
+                esac
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Error: unknown argument '$1'${NC}"
+                echo ""
+                usage
+                exit 1
+                ;;
+        esac
+        shift
+    done
+}
+
+prompt_install_mode() {
+    if [ "$MODE_EXPLICIT" -eq 1 ] || [ ! -t 0 ]; then
+        return
+    fi
+
+    echo -e "${BLUE}Select installation mode:${NC}"
+    echo "  1) Main version (single instance)"
+    echo "  2) Dual version (two instances: ucxsync@a + ucxsync@b)"
+    printf "Choose [1/2] (default: 1): "
+    read -r MODE_CHOICE
+
+    case "$MODE_CHOICE" in
+        2|dual|Dual|DUAL)
+            INSTALL_MODE="dual"
+            ;;
+        ""|1|single|Single|SINGLE)
+            INSTALL_MODE="single"
+            ;;
+        *)
+            echo -e "${YELLOW}Unknown selection, using single-instance installation${NC}"
+            INSTALL_MODE="single"
+            ;;
+    esac
+}
+
+copy_if_missing() {
+    local src="$1"
+    local dst="$2"
+    local description="$3"
+
+    if [ ! -f "$src" ]; then
+        echo -e "${YELLOW}⚠${NC}  Source file not found, skipping: $src"
+        return
+    fi
+
+    if [ -f "$dst" ]; then
+        echo -e "${YELLOW}⚠${NC}  $description already exists, skipping: $dst"
+    else
+        cp "$src" "$dst"
+        echo -e "${GREEN}✓${NC} $description installed: $dst"
+    fi
+}
+
+print_mode_summary() {
+    if [ "$INSTALL_MODE" = "dual" ]; then
+        echo -e "${BLUE}Installation mode: dual${NC}"
+    else
+        echo -e "${BLUE}Installation mode: single${NC}"
+    fi
+}
+
+parse_args "$@"
+prompt_install_mode
+
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}       UCXSync Installation${NC}"
 echo -e "${GREEN}========================================${NC}"
+echo ""
+print_mode_summary
 echo ""
 
 # Detect architecture
@@ -68,21 +187,21 @@ echo -e "${GREEN}[1/6] Checking prerequisites...${NC}"
 if ! command -v go &> /dev/null; then
     echo -e "${YELLOW}Go is not installed. Installing...${NC}"
     echo "Downloading $GO_DOWNLOAD..."
-    
+
     wget -q https://go.dev/dl/$GO_DOWNLOAD -O /tmp/$GO_DOWNLOAD || {
         echo -e "${RED}Failed to download Go${NC}"
         echo "Please install Go manually from: https://go.dev/dl/"
         exit 1
     }
-    
+
     tar -C /usr/local -xzf /tmp/$GO_DOWNLOAD
     rm /tmp/$GO_DOWNLOAD
-    
+
     # Add to PATH
     if ! grep -q '/usr/local/go/bin' /etc/profile; then
         echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
     fi
-    
+
     export PATH=$PATH:/usr/local/go/bin
     echo -e "${GREEN}✓ Go installed${NC}"
 else
@@ -93,7 +212,7 @@ fi
 # Check cifs-utils
 if ! dpkg -l | grep -q cifs-utils 2>/dev/null && ! rpm -q cifs-utils &>/dev/null; then
     echo -e "${YELLOW}Installing cifs-utils...${NC}"
-    
+
     if command -v apt-get &> /dev/null; then
         apt-get update -qq
         apt-get install -y cifs-utils
@@ -106,7 +225,7 @@ if ! dpkg -l | grep -q cifs-utils 2>/dev/null && ! rpm -q cifs-utils &>/dev/null
         echo "Please install manually: apt-get install cifs-utils"
         exit 1
     fi
-    
+
     echo -e "${GREEN}✓ cifs-utils installed${NC}"
 else
     echo -e "${GREEN}✓ cifs-utils already installed${NC}"
@@ -123,9 +242,14 @@ mkdir -p /opt/ucxsync
 mkdir -p /etc/ucxsync
 mkdir -p /var/log/ucxsync
 
-# Create mount points for UCX nodes (network shares)
-mkdir -p /ucmount
-echo -e "${GREEN}✓${NC} Created /ucmount (UCX network mount points)"
+if [ "$INSTALL_MODE" = "dual" ]; then
+    mkdir -p /ucmount-a
+    mkdir -p /ucmount-b
+    echo -e "${GREEN}✓${NC} Created /ucmount-a and /ucmount-b (dual UCX network mount points)"
+else
+    mkdir -p /ucmount
+    echo -e "${GREEN}✓${NC} Created /ucmount (UCX network mount points)"
+fi
 
 # Create storage directory for USB-SSD
 mkdir -p /ucdata
@@ -134,8 +258,7 @@ echo -e "${GREEN}✓${NC} Created /ucdata (USB-SSD mount point)"
 # Check if USB-SSD is already mounted
 if mountpoint -q /ucdata; then
     echo -e "${GREEN}✓${NC} /ucdata is already mounted"
-    
-    # Set permissions for user access
+
     USER_NAME=${SUDO_USER:-$(whoami)}
     chown -R $USER_NAME:$USER_NAME /ucdata 2>/dev/null || true
     echo -e "${GREEN}✓${NC} Permissions set for /ucdata"
@@ -181,45 +304,67 @@ else
     echo -e "${YELLOW}⚠${NC}  Network hosts mapping already exists in /etc/hosts"
 fi
 
-# Install binary
 echo ""
 echo "Installing binary..."
 cp ucxsync /opt/ucxsync/
 chmod +x /opt/ucxsync/ucxsync
 echo -e "${GREEN}✓${NC} Binary installed to /opt/ucxsync/ucxsync"
 
-# Install web assets
 echo ""
 echo "Installing web assets..."
+rm -rf /opt/ucxsync/web
 cp -r web /opt/ucxsync/
 echo -e "${GREEN}✓${NC} Web assets installed to /opt/ucxsync/web"
 
-# Install config
-if [ ! -f /etc/ucxsync/config.yaml ]; then
-    echo ""
-    echo "Installing default configuration..."
-    cp config.example.yaml /etc/ucxsync/config.yaml
-    echo -e "${GREEN}✓${NC} Configuration installed to /etc/ucxsync/config.yaml"
-    echo -e "${YELLOW}⚠${NC}  Please edit /etc/ucxsync/config.yaml with your settings"
+echo ""
+echo "Installing configuration..."
+if [ "$INSTALL_MODE" = "dual" ]; then
+    copy_if_missing config.instance-a.yaml /etc/ucxsync/a.yaml "Instance A configuration"
+    copy_if_missing config.instance-b.yaml /etc/ucxsync/b.yaml "Instance B configuration"
+    copy_if_missing config.example.yaml /etc/ucxsync/config.yaml "Legacy single-instance configuration"
+
+    if [ -f setup-dualnic-routing.sh ]; then
+        cp setup-dualnic-routing.sh /opt/ucxsync/setup-dualnic-routing.sh
+        chmod +x /opt/ucxsync/setup-dualnic-routing.sh
+        echo -e "${GREEN}✓${NC} Dual-NIC helper installed to /opt/ucxsync/setup-dualnic-routing.sh"
+    else
+        echo -e "${YELLOW}⚠${NC}  setup-dualnic-routing.sh not found, helper was not installed"
+    fi
 else
-    echo -e "${YELLOW}⚠${NC}  Configuration already exists, skipping"
+    if [ ! -f /etc/ucxsync/config.yaml ]; then
+        cp config.example.yaml /etc/ucxsync/config.yaml
+        echo -e "${GREEN}✓${NC} Configuration installed to /etc/ucxsync/config.yaml"
+        echo -e "${YELLOW}⚠${NC}  Please edit /etc/ucxsync/config.yaml with your settings"
+    else
+        echo -e "${YELLOW}⚠${NC}  Configuration already exists, skipping"
+    fi
 fi
 
-# Install systemd service
 echo ""
 echo "Installing systemd service..."
 cp ucxsync.service /etc/systemd/system/
+if [ "$INSTALL_MODE" = "dual" ]; then
+    cp ucxsync@.service /etc/systemd/system/
+    echo -e "${GREEN}✓${NC} Template service installed: /etc/systemd/system/ucxsync@.service"
+fi
 systemctl daemon-reload
 echo -e "${GREEN}✓${NC} Service installed"
 
-# Set permissions
 echo ""
 echo "Setting permissions..."
 chown -R root:root /opt/ucxsync
 chown -R root:root /etc/ucxsync
 chown -R root:root /var/log/ucxsync
 chmod 700 /etc/ucxsync
-chmod 600 /etc/ucxsync/config.yaml
+if [ -f /etc/ucxsync/config.yaml ]; then
+    chmod 600 /etc/ucxsync/config.yaml
+fi
+if [ -f /etc/ucxsync/a.yaml ]; then
+    chmod 600 /etc/ucxsync/a.yaml
+fi
+if [ -f /etc/ucxsync/b.yaml ]; then
+    chmod 600 /etc/ucxsync/b.yaml
+fi
 echo -e "${GREEN}✓${NC} Permissions set"
 
 echo ""
@@ -227,15 +372,19 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}   Installation complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo -e "${BLUE}Binary installed:${NC} /usr/local/bin/ucxsync"
-echo -e "${BLUE}Configuration:${NC} /etc/ucxsync/config.yaml"
-echo -e "${BLUE}Service file:${NC} /etc/systemd/system/ucxsync.service"
+echo -e "${BLUE}Binary installed:${NC} /opt/ucxsync/ucxsync"
+if [ "$INSTALL_MODE" = "dual" ]; then
+    echo -e "${BLUE}Configurations:${NC} /etc/ucxsync/a.yaml and /etc/ucxsync/b.yaml"
+    echo -e "${BLUE}Service files:${NC} /etc/systemd/system/ucxsync.service and /etc/systemd/system/ucxsync@.service"
+else
+    echo -e "${BLUE}Configuration:${NC} /etc/ucxsync/config.yaml"
+    echo -e "${BLUE}Service file:${NC} /etc/systemd/system/ucxsync.service"
+fi
 echo ""
 echo -e "${YELLOW}========================================${NC}"
 echo -e "${YELLOW}   IMPORTANT: USB-SSD Setup${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
-# Check if USB-SSD is mounted
 if ! mountpoint -q /ucdata; then
     echo ""
     echo -e "${RED}⚠ USB-SSD is NOT mounted!${NC}"
@@ -253,8 +402,7 @@ if ! mountpoint -q /ucdata; then
 else
     echo ""
     echo -e "${GREEN}✓ USB-SSD is mounted at /ucdata${NC}"
-    
-    # Show storage info
+
     STORAGE_INFO=$(df -h /ucdata | tail -1 | awk '{print $2 " total, " $4 " free"}')
     echo -e "${BLUE}Storage:${NC} $STORAGE_INFO"
     echo ""
@@ -264,31 +412,69 @@ echo -e "${YELLOW}========================================${NC}"
 echo -e "${YELLOW}   Next Steps${NC}"
 echo -e "${YELLOW}========================================${NC}"
 echo ""
-echo "1. ${BLUE}Edit configuration:${NC}"
-echo "   sudo nano /etc/ucxsync/config.yaml"
-echo ""
-echo "   Update these settings:"
-echo "   - sync.project (your project name)"
+
+if [ "$INSTALL_MODE" = "dual" ]; then
+    echo "1. ${BLUE}Edit dual-instance configurations:${NC}"
+    echo "   sudo nano /etc/ucxsync/a.yaml"
+    echo "   sudo nano /etc/ucxsync/b.yaml"
+    echo ""
+    echo "   Verify these settings:"
+    echo "   - node lists do not overlap"
+    echo "   - network.mount_root is /ucmount-a and /ucmount-b"
+    echo "   - web.port is 8080 and 8081"
+    echo "   - logging.file is different in each config"
+    echo ""
+    echo "2. ${BLUE}Setup USB-SSD auto-mount (recommended):${NC}"
+    echo "   sudo ./setup-usb-automount.sh"
+    echo ""
+    echo "3. ${BLUE}Install dual-NIC routing helper (recommended):${NC}"
+    echo "   sudo END0_IFACE=end0 END1_IFACE=end1 END0_SRC_IP=192.168.200.101 END1_SRC_IP=192.168.200.102 END0_HOSTS=\"1 2 3 4 5 6 7\" END1_HOSTS=\"8 9 10 11 12 13 201\" /opt/ucxsync/setup-dualnic-routing.sh --install"
+    echo ""
+    echo "4. ${BLUE}Enable auto-start:${NC}"
+    echo "   sudo systemctl enable ucxsync@a ucxsync@b"
+    echo ""
+    echo "5. ${BLUE}Start both instances:${NC}"
+    echo "   sudo systemctl start ucxsync@a ucxsync@b"
+    echo ""
+    echo "6. ${BLUE}Check status:${NC}"
+    echo "   sudo systemctl status ucxsync@a"
+    echo "   sudo systemctl status ucxsync@b"
+    echo ""
+    echo "7. ${BLUE}View logs:${NC}"
+    echo "   sudo journalctl -u ucxsync@a -f"
+    echo "   sudo journalctl -u ucxsync@b -f"
+    echo ""
+    echo "8. ${BLUE}Access web interfaces:${NC}"
+    echo "   http://localhost:8080"
+    echo "   http://localhost:8081"
+else
+    echo "1. ${BLUE}Edit configuration:${NC}"
+    echo "   sudo nano /etc/ucxsync/config.yaml"
+    echo ""
+    echo "   Update these settings:"
+    echo "   - sync.project (your project name)"
     echo "   - sync.destination (/ucdata)"
-echo "   - credentials.username and password"
-echo ""
-echo "2. ${BLUE}Setup USB-SSD auto-mount (recommended):${NC}"
-echo "   sudo ./setup-usb-automount.sh"
-echo ""
-echo "3. ${BLUE}Enable auto-start:${NC}"
-echo "   sudo systemctl enable ucxsync"
-echo ""
-echo "3. ${BLUE}Start service:${NC}"
-echo "   sudo systemctl start ucxsync"
-echo ""
-echo "4. ${BLUE}Check status:${NC}"
-echo "   sudo systemctl status ucxsync"
-echo ""
-echo "5. ${BLUE}View logs:${NC}"
-echo "   sudo journalctl -u ucxsync -f"
-echo ""
-echo "6. ${BLUE}Access web interface:${NC}"
-echo "   http://localhost:8080"
+    echo "   - credentials.username and password"
+    echo ""
+    echo "2. ${BLUE}Setup USB-SSD auto-mount (recommended):${NC}"
+    echo "   sudo ./setup-usb-automount.sh"
+    echo ""
+    echo "3. ${BLUE}Enable auto-start:${NC}"
+    echo "   sudo systemctl enable ucxsync"
+    echo ""
+    echo "4. ${BLUE}Start service:${NC}"
+    echo "   sudo systemctl start ucxsync"
+    echo ""
+    echo "5. ${BLUE}Check status:${NC}"
+    echo "   sudo systemctl status ucxsync"
+    echo ""
+    echo "6. ${BLUE}View logs:${NC}"
+    echo "   sudo journalctl -u ucxsync -f"
+    echo ""
+    echo "7. ${BLUE}Access web interface:${NC}"
+    echo "   http://localhost:8080"
+fi
+
 echo ""
 echo -e "${YELLOW}========================================${NC}"
 echo ""

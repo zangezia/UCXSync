@@ -1,0 +1,47 @@
+# Example configuration for UCXSync instance B
+# Split nodes, port, mount root, and log file from instance A
+
+nodes:
+  - WU08
+  - WU09
+  - WU10
+  - WU11
+  - WU12
+  - WU13
+  - CU
+
+shares:
+  - E$
+  - F$
+
+credentials:
+  username: Administrator
+  password: ultracam
+
+network:
+  mount_root: "/ucmount-b"
+
+sync:
+  destination: "/ucdata"
+  max_parallelism: 4
+  service_loop_interval: 10s
+  min_free_disk_space: 52428800
+  disk_space_safety_margin: 104857600
+
+web:
+  host: 0.0.0.0
+  port: 8081
+
+monitoring:
+  performance_update_interval: 1s
+  ui_update_interval: 2s
+  cpu_smoothing_samples: 3
+  max_disk_throughput_mbps: 200.0
+  network_speed_bps: 1000000000
+
+logging:
+  level: info
+  file: /var/log/ucxsync/ucxsync-b.log
+  max_size: 100
+  max_backups: 5
+  max_age: 30

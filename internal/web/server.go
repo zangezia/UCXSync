@@ -29,8 +29,7 @@ var upgrader = websocket.Upgrader{
 }
 
 const (
-	defaultNetworkMountRoot = "/ucmount"
-	defaultDataMountPoint   = "/ucdata"
+	defaultDataMountPoint = "/ucdata"
 )
 
 // Server represents the web server
@@ -39,10 +38,19 @@ type Server struct {
 	syncService *syncService.Service
 	monService  *monitor.Service
 	netService  *network.Service
+	serviceName string
 	webRoot     string
 
 	mu      sync.RWMutex
 	clients map[*websocket.Conn]bool
+}
+
+func getServiceName() string {
+	if serviceName := strings.TrimSpace(os.Getenv("UCXSYNC_SERVICE_NAME")); serviceName != "" {
+		return serviceName
+	}
+
+	return "ucxsync"
 }
 
 // getWebRoot determines the web assets directory
@@ -75,7 +83,7 @@ func NewServer(cfg *config.Config) *Server {
 	svc := syncService.New(
 		cfg.Nodes,
 		cfg.Shares,
-		defaultNetworkMountRoot, // TODO: Get from config
+		cfg.Network.MountRoot,
 	)
 
 	monService := monitor.New(
@@ -91,12 +99,14 @@ func NewServer(cfg *config.Config) *Server {
 		cfg.Credentials.Username,
 		cfg.Credentials.Password,
 	)
+	netService.SetBaseMountDir(cfg.Network.MountRoot)
 
 	return &Server{
 		cfg:         cfg,
 		syncService: svc,
 		monService:  monService,
 		netService:  netService,
+		serviceName: getServiceName(),
 		webRoot:     getWebRoot(),
 		clients:     make(map[*websocket.Conn]bool),
 	}
@@ -438,7 +448,7 @@ func (s *Server) getAvailableDestinations() []models.DestinationInfo {
 		}
 
 		// Skip UCX network mounts
-		if strings.HasPrefix(mountPoint, defaultNetworkMountRoot) {
+		if strings.HasPrefix(mountPoint, s.cfg.Network.MountRoot) {
 			continue
 		}
 
@@ -616,7 +626,7 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("sh", "-c", "sleep 1; systemctl restart ucxsync")
+	cmd := exec.Command("sh", "-c", "sleep 1; systemctl restart \"$1\"", "sh", s.serviceName)
 	if err := cmd.Start(); err != nil {
 		log.Error().Err(err).Msg("Failed to schedule service restart")
 		http.Error(w, fmt.Sprintf("failed to restart service: %v", err), http.StatusInternalServerError)
@@ -628,7 +638,7 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 		Payload: models.LogMessage{
 			Timestamp: time.Now(),
 			Level:     "warn",
-			Message:   "Запрошен перезапуск службы UCXSync",
+			Message:   fmt.Sprintf("Запрошен перезапуск службы %s", s.serviceName),
 		},
 	})
 
@@ -706,7 +716,7 @@ func (s *Server) getBlockDevices() ([]models.BlockDeviceInfo, error) {
 			}
 
 			// Skip UCX network mounts
-			if strings.HasPrefix(dev.MountPoint, defaultNetworkMountRoot) {
+			if strings.HasPrefix(dev.MountPoint, s.cfg.Network.MountRoot) {
 				walkDevices(dev.Children)
 				continue
 			}

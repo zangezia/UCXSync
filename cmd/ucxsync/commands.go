@@ -30,6 +30,7 @@ func runMount(cmd *cobra.Command, args []string) {
 		cfg.Credentials.Username,
 		cfg.Credentials.Password,
 	)
+	netService.SetBaseMountDir(cfg.Network.MountRoot)
 
 	// Mount all shares
 	if err := netService.MountAll(); err != nil {
@@ -38,7 +39,7 @@ func runMount(cmd *cobra.Command, args []string) {
 	}
 
 	log.Info().Msg("✓ All shares mounted successfully")
-	log.Info().Msg("Mount point: /mnt/ucx")
+	log.Info().Str("mount_root", cfg.Network.MountRoot).Msg("Mount root")
 }
 
 func runUnmount(cmd *cobra.Command, args []string) {
@@ -59,6 +60,7 @@ func runUnmount(cmd *cobra.Command, args []string) {
 		cfg.Credentials.Username,
 		cfg.Credentials.Password,
 	)
+	netService.SetBaseMountDir(cfg.Network.MountRoot)
 
 	// Unmount all shares
 	if err := netService.UnmountAll(); err != nil {
@@ -83,6 +85,7 @@ func runCheck(cmd *cobra.Command, args []string) {
 	log.Info().Msg("✓ Configuration loaded")
 	log.Info().Int("nodes", len(cfg.Nodes)).Msg("Configured nodes")
 	log.Info().Int("shares", len(cfg.Shares)).Msg("Configured shares")
+	log.Info().Str("mount_root", cfg.Network.MountRoot).Msg("Configured mount root")
 
 	// Check network requirements
 	if err := network.CheckRequirements(); err != nil {

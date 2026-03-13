@@ -6,8 +6,10 @@ SCRIPT_NAME=$(basename "$0")
 INSTALL_PATH="/usr/local/sbin/ucxsync-dualnic-routing.sh"
 SERVICE_PATH="/etc/systemd/system/ucxsync-dualnic-routing.service"
 SYSCTL_PATH="/etc/sysctl.d/99-ucxsync-dualnic.conf"
-UCXSYNC_DROPIN_DIR="/etc/systemd/system/ucxsync.service.d"
-UCXSYNC_DROPIN_PATH="$UCXSYNC_DROPIN_DIR/10-dualnic-routing.conf"
+UCXSYNC_SINGLE_DROPIN_DIR="/etc/systemd/system/ucxsync.service.d"
+UCXSYNC_SINGLE_DROPIN_PATH="$UCXSYNC_SINGLE_DROPIN_DIR/10-dualnic-routing.conf"
+UCXSYNC_TEMPLATE_DROPIN_DIR="/etc/systemd/system/ucxsync@.service.d"
+UCXSYNC_TEMPLATE_DROPIN_PATH="$UCXSYNC_TEMPLATE_DROPIN_DIR/10-dualnic-routing.conf"
 
 # Override via environment if needed.
 END0_IFACE="${END0_IFACE:-end0}"
@@ -48,6 +50,10 @@ What it does:
   --install  Install persistent sysctl + systemd oneshot service and apply now
   --remove   Remove persistent config/service and delete configured host routes
   --print    Print the computed configuration without changing the system
+
+The install mode also wires routing to start before both:
+    - ucxsync.service
+    - ucxsync@.service (all template instances)
 
 Environment overrides:
   END0_IFACE=end0
@@ -278,7 +284,7 @@ install_service() {
 Description=UCXSync dual-NIC routing setup
 After=network-online.target
 Wants=network-online.target
-Before=ucxsync.service
+Before=ucxsync.service ucxsync@.service
 
 [Service]
 Type=oneshot
@@ -297,7 +303,14 @@ WantedBy=multi-user.target
 EOF
 
         cat <<EOF
-[dry-run] would write $UCXSYNC_DROPIN_PATH
+[dry-run] would write $UCXSYNC_SINGLE_DROPIN_PATH
+[Unit]
+Wants=ucxsync-dualnic-routing.service
+After=ucxsync-dualnic-routing.service
+EOF
+
+    cat <<EOF
+[dry-run] would write $UCXSYNC_TEMPLATE_DROPIN_PATH
 [Unit]
 Wants=ucxsync-dualnic-routing.service
 After=ucxsync-dualnic-routing.service
@@ -310,7 +323,7 @@ EOF
 Description=UCXSync dual-NIC routing setup
 After=network-online.target
 Wants=network-online.target
-Before=ucxsync.service
+Before=ucxsync.service ucxsync@.service
 
 [Service]
 Type=oneshot
@@ -328,9 +341,17 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-    log "Writing UCXSync ordering drop-in to $UCXSYNC_DROPIN_PATH"
-    run_cmd mkdir -p "$UCXSYNC_DROPIN_DIR"
-    cat > "$UCXSYNC_DROPIN_PATH" <<EOF
+    log "Writing UCXSync ordering drop-in to $UCXSYNC_SINGLE_DROPIN_PATH"
+    run_cmd mkdir -p "$UCXSYNC_SINGLE_DROPIN_DIR"
+    cat > "$UCXSYNC_SINGLE_DROPIN_PATH" <<EOF
+[Unit]
+Wants=ucxsync-dualnic-routing.service
+After=ucxsync-dualnic-routing.service
+EOF
+
+    log "Writing UCXSync template ordering drop-in to $UCXSYNC_TEMPLATE_DROPIN_PATH"
+    run_cmd mkdir -p "$UCXSYNC_TEMPLATE_DROPIN_DIR"
+    cat > "$UCXSYNC_TEMPLATE_DROPIN_PATH" <<EOF
 [Unit]
 Wants=ucxsync-dualnic-routing.service
 After=ucxsync-dualnic-routing.service
@@ -358,8 +379,11 @@ remove_installation() {
     if [[ -f "$SYSCTL_PATH" ]]; then
         run_cmd rm -f "$SYSCTL_PATH"
     fi
-    if [[ -f "$UCXSYNC_DROPIN_PATH" ]]; then
-        run_cmd rm -f "$UCXSYNC_DROPIN_PATH"
+    if [[ -f "$UCXSYNC_SINGLE_DROPIN_PATH" ]]; then
+        run_cmd rm -f "$UCXSYNC_SINGLE_DROPIN_PATH"
+    fi
+    if [[ -f "$UCXSYNC_TEMPLATE_DROPIN_PATH" ]]; then
+        run_cmd rm -f "$UCXSYNC_TEMPLATE_DROPIN_PATH"
     fi
 
     if [[ "$DRY_RUN" -eq 0 ]]; then

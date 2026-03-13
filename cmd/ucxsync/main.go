@@ -33,14 +33,14 @@ with real-time monitoring through a web interface.`,
 var mountCmd = &cobra.Command{
 	Use:   "mount",
 	Short: "Mount network shares",
-	Long:  "Mount all configured network shares to /mnt/ucx",
+	Long:  "Mount all configured network shares to the configured network.mount_root",
 	Run:   runMount,
 }
 
 var unmountCmd = &cobra.Command{
 	Use:   "unmount",
 	Short: "Unmount network shares",
-	Long:  "Unmount all network shares from /mnt/ucx",
+	Long:  "Unmount all network shares from the configured network.mount_root",
 	Run:   runUnmount,
 }
 
@@ -106,6 +106,7 @@ func runApp(cmd *cobra.Command, args []string) {
 	log.Info().Msg("========================================")
 	log.Info().Int("nodes", len(cfg.Nodes)).Msg("Configured nodes")
 	log.Info().Int("shares", len(cfg.Shares)).Msg("Configured shares")
+	log.Info().Str("mount_root", cfg.Network.MountRoot).Msg("Network mount root")
 	log.Info().Int("parallelism", cfg.Sync.MaxParallelism).Msg("Max parallelism")
 
 	// Create context with cancellation

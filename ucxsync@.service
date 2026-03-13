@@ -1,5 +1,5 @@
 [Unit]
-Description=UCXSync - File synchronization service
+Description=UCXSync instance %i - File synchronization service
 After=network-online.target
 Wants=network-online.target
 
@@ -9,14 +9,14 @@ User=root
 Group=root
 WorkingDirectory=/opt/ucxsync
 Environment=UCXSYNC_SERVICE_NAME=%N
-ExecStart=/opt/ucxsync/ucxsync --config /etc/ucxsync/config.yaml
+ExecStart=/opt/ucxsync/ucxsync --config /etc/ucxsync/%i.yaml
 Restart=on-failure
 RestartSec=10
 
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=ucxsync
+SyslogIdentifier=ucxsync-%i
 
 # Security
 NoNewPrivileges=true

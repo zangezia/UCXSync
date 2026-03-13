@@ -27,6 +27,10 @@ credentials:
   username: Administrator
   password: ultracam
 
+# Network share mounting
+network:
+  mount_root: "/ucmount"
+
 # Synchronization settings (optimized for Orange Pi RV2 RISC-V)
 sync:
   project: "Arh2k_mezen_200725"       # Project name
@@ -65,4 +69,4 @@ logging:
 # - Consider adding cooling if running 24/7
 # - Network: Use wired Ethernet for stability
 # - CPU: Spacemit K1 (8-core RISC-V @ 2.0GHz)
-# - Runtime mount path is currently fixed in code to /ucmount
+# - For two instances, use different network.mount_root values such as /ucmount-a and /ucmount-b
