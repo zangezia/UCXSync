@@ -176,6 +176,10 @@ remove_empty_config_dir() {
     fi
 }
 
+dual_routing_exists() {
+    [ -f "$DUAL_ROUTING_SERVICE" ] || [ -f "$DUAL_ROUTING_SCRIPT" ] || [ -f "$DUAL_ROUTING_INSTALLER" ] || [ -d "$DUAL_SINGLE_DROPIN_DIR" ] || [ -d "$DUAL_TEMPLATE_DROPIN_DIR" ] || [ -f "$DUAL_SYSCTL_FILE" ]
+}
+
 parse_args "$@"
 prompt_uninstall_mode
 
@@ -236,16 +240,31 @@ case "$UNINSTALL_MODE" in
         ;;
     dual)
         rm -f /etc/systemd/system/ucxsync@.service
-        remove_dual_routing
         ;;
     all)
         rm -f /etc/systemd/system/ucxsync.service
         rm -f /etc/systemd/system/ucxsync@.service
-        remove_dual_routing
         ;;
 esac
 systemctl daemon-reload
 echo -e "${GREEN}✓${NC} Service files removed"
+
+if dual_routing_exists; then
+    echo ""
+    if [ "$UNINSTALL_MODE" = "all" ]; then
+        if ask_yes_no "Remove host-wide dual-NIC routing helper/service too?"; then
+            remove_dual_routing
+        else
+            echo -e "${YELLOW}⚠${NC}  Dual-NIC routing preserved"
+        fi
+    else
+        if ask_yes_no "Remove host-wide dual-NIC routing helper/service?"; then
+            remove_dual_routing
+        else
+            echo -e "${YELLOW}⚠${NC}  Dual-NIC routing preserved"
+        fi
+    fi
+fi
 
 echo ""
 if [ "$UNINSTALL_MODE" = "single" ]; then

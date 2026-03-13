@@ -14,21 +14,36 @@ NC='\033[0m' # No Color
 
 INSTALL_MODE="single"
 MODE_EXPLICIT=0
+INSTALL_DUALNIC_ROUTING=0
+ROUTING_EXPLICIT=0
+END0_IFACE_VALUE="${END0_IFACE:-end0}"
+END1_IFACE_VALUE="${END1_IFACE:-end1}"
+END0_SRC_IP_VALUE="${END0_SRC_IP:-192.168.200.101}"
+END1_SRC_IP_VALUE="${END1_SRC_IP:-192.168.200.102}"
+END0_HOSTS_VALUE="${END0_HOSTS:-1 2 3 4 5 6 7}"
+END1_HOSTS_VALUE="${END1_HOSTS:-8 9 10 11 12 13 201}"
 
 usage() {
     cat <<EOF
 Usage:
-  sudo ./install.sh [--single | --dual | --mode single|dual]
+    sudo ./install.sh [--single | --dual | --mode single|dual] [--install-dualnic-routing]
 
 Modes:
   --single           Install the main single-instance deployment (default)
   --dual             Install the dual deployment (ucxsync@a + ucxsync@b)
   --mode <value>     Explicitly choose 'single' or 'dual'
+    --install-dualnic-routing
+                                         Install and enable the dual-NIC routing helper during setup
+    --skip-dualnic-routing
+                                         Skip dual-NIC routing setup even in interactive mode
   -h, --help         Show this help
 
 Behavior:
   - In interactive mode, the script asks which version to install if no flag is given.
   - In non-interactive mode, single-instance installation is used by default.
+    - When dual-NIC routing is enabled, interface and host settings can be overridden
+        through END0_IFACE / END1_IFACE / END0_SRC_IP / END1_SRC_IP / END0_HOSTS / END1_HOSTS.
+    - In interactive mode, the installer can prompt for these routing values.
 EOF
 }
 
@@ -59,6 +74,14 @@ parse_args() {
                         exit 1
                         ;;
                 esac
+                ;;
+            --install-dualnic-routing)
+                INSTALL_DUALNIC_ROUTING=1
+                ROUTING_EXPLICIT=1
+                ;;
+            --skip-dualnic-routing)
+                INSTALL_DUALNIC_ROUTING=0
+                ROUTING_EXPLICIT=1
                 ;;
             -h|--help)
                 usage
@@ -100,6 +123,80 @@ prompt_install_mode() {
     esac
 }
 
+prompt_dualnic_routing() {
+    if [ "$ROUTING_EXPLICIT" -eq 1 ] || [ ! -t 0 ]; then
+        return
+    fi
+
+    echo ""
+    echo -e "${BLUE}Install dual-NIC routing helper as part of setup?${NC}"
+    echo "  This is useful for both single and dual deployments when you want specific UCX hosts"
+    echo "  pinned to specific LAN interfaces (for example end0 + USB-LAN adapter)."
+    printf "Install dual-NIC routing now? [y/N]: "
+    read -r ROUTING_CHOICE
+
+    case "$ROUTING_CHOICE" in
+        y|Y|yes|YES)
+            INSTALL_DUALNIC_ROUTING=1
+            ;;
+        *)
+            INSTALL_DUALNIC_ROUTING=0
+            ;;
+    esac
+}
+
+prompt_value() {
+    local prompt="$1"
+    local default_value="$2"
+    local result
+
+    printf "%s [%s]: " "$prompt" "$default_value"
+    read -r result
+    if [ -z "$result" ]; then
+        result="$default_value"
+    fi
+    printf '%s' "$result"
+}
+
+normalize_hosts_value() {
+    local raw="$1"
+    raw="${raw//,/ }"
+    printf '%s' "$raw" | awk '{$1=$1; print}'
+}
+
+show_detected_interfaces() {
+    if ! command -v ip >/dev/null 2>&1; then
+        return
+    fi
+
+    echo "  Available interfaces:"
+    ip -o link show | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -v '^lo$' | sed 's/^/    - /'
+}
+
+prompt_routing_parameters() {
+    if [ "$INSTALL_DUALNIC_ROUTING" -ne 1 ] || [ ! -t 0 ]; then
+        return
+    fi
+
+    echo ""
+    echo -e "${BLUE}Dual-NIC routing wizard${NC}"
+    echo "  Leave values empty to accept the defaults shown in brackets."
+    show_detected_interfaces
+
+    END0_IFACE_VALUE=$(prompt_value "  Primary interface for the first host group" "$END0_IFACE_VALUE")
+    echo ""
+    END0_SRC_IP_VALUE=$(prompt_value "  Source IPv4 address on $END0_IFACE_VALUE" "$END0_SRC_IP_VALUE")
+    echo ""
+    END0_HOSTS_VALUE=$(normalize_hosts_value "$(prompt_value "  Hosts routed via $END0_IFACE_VALUE (last octets or full IPs)" "$END0_HOSTS_VALUE")")
+    echo ""
+    END1_IFACE_VALUE=$(prompt_value "  Secondary interface for the second host group" "$END1_IFACE_VALUE")
+    echo ""
+    END1_SRC_IP_VALUE=$(prompt_value "  Source IPv4 address on $END1_IFACE_VALUE" "$END1_SRC_IP_VALUE")
+    echo ""
+    END1_HOSTS_VALUE=$(normalize_hosts_value "$(prompt_value "  Hosts routed via $END1_IFACE_VALUE (last octets or full IPs)" "$END1_HOSTS_VALUE")")
+    echo ""
+}
+
 copy_if_missing() {
     local src="$1"
     local dst="$2"
@@ -126,14 +223,55 @@ print_mode_summary() {
     fi
 }
 
+print_routing_summary() {
+    if [ "$INSTALL_DUALNIC_ROUTING" -eq 1 ]; then
+        echo -e "${BLUE}Dual-NIC routing setup: enabled${NC}"
+        echo -e "${BLUE}  primary:${NC} $END0_IFACE_VALUE ($END0_SRC_IP_VALUE) -> $END0_HOSTS_VALUE"
+        echo -e "${BLUE}  secondary:${NC} $END1_IFACE_VALUE ($END1_SRC_IP_VALUE) -> $END1_HOSTS_VALUE"
+    else
+        echo -e "${BLUE}Dual-NIC routing setup: disabled${NC}"
+    fi
+}
+
+install_dualnic_routing() {
+    if [ "$INSTALL_DUALNIC_ROUTING" -ne 1 ]; then
+        return
+    fi
+
+    if [ ! -x /opt/ucxsync/setup-dualnic-routing.sh ]; then
+        echo -e "${YELLOW}⚠${NC}  Dual-NIC helper is unavailable, skipping routing installation"
+        return
+    fi
+
+    echo ""
+    echo "Installing dual-NIC routing helper..."
+    if END0_IFACE="$END0_IFACE_VALUE" \
+        END1_IFACE="$END1_IFACE_VALUE" \
+        END0_SRC_IP="$END0_SRC_IP_VALUE" \
+        END1_SRC_IP="$END1_SRC_IP_VALUE" \
+        END0_HOSTS="$END0_HOSTS_VALUE" \
+        END1_HOSTS="$END1_HOSTS_VALUE" \
+        /opt/ucxsync/setup-dualnic-routing.sh --install; then
+        echo -e "${GREEN}✓${NC} Dual-NIC routing installed and enabled"
+    else
+        echo -e "${YELLOW}⚠${NC}  Dual-NIC routing installation failed"
+        echo -e "${YELLOW}⚠${NC}  You can retry later with environment overrides, for example:"
+        echo "     sudo END0_IFACE=end0 END1_IFACE=enx00e04c141b68 END0_SRC_IP=192.168.200.101 END1_SRC_IP=192.168.200.103 /opt/ucxsync/setup-dualnic-routing.sh --install"
+    fi
+}
+
 parse_args "$@"
 prompt_install_mode
+prompt_dualnic_routing
+
+
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}       UCXSync Installation${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 print_mode_summary
+print_routing_summary
 echo ""
 
 # Detect architecture
@@ -170,6 +308,8 @@ if [ "$EUID" -ne 0 ]; then
     echo "Please run: sudo ./install.sh"
     exit 1
 fi
+
+prompt_routing_parameters
 
 # Detect OS
 if [ -f /etc/os-release ]; then
@@ -323,13 +463,6 @@ if [ "$INSTALL_MODE" = "dual" ]; then
     copy_if_missing config.instance-b.yaml /etc/ucxsync/b.yaml "Instance B configuration"
     copy_if_missing config.example.yaml /etc/ucxsync/config.yaml "Legacy single-instance configuration"
 
-    if [ -f setup-dualnic-routing.sh ]; then
-        cp setup-dualnic-routing.sh /opt/ucxsync/setup-dualnic-routing.sh
-        chmod +x /opt/ucxsync/setup-dualnic-routing.sh
-        echo -e "${GREEN}✓${NC} Dual-NIC helper installed to /opt/ucxsync/setup-dualnic-routing.sh"
-    else
-        echo -e "${YELLOW}⚠${NC}  setup-dualnic-routing.sh not found, helper was not installed"
-    fi
 else
     if [ ! -f /etc/ucxsync/config.yaml ]; then
         cp config.example.yaml /etc/ucxsync/config.yaml
@@ -338,6 +471,14 @@ else
     else
         echo -e "${YELLOW}⚠${NC}  Configuration already exists, skipping"
     fi
+fi
+
+if [ -f setup-dualnic-routing.sh ]; then
+    cp setup-dualnic-routing.sh /opt/ucxsync/setup-dualnic-routing.sh
+    chmod +x /opt/ucxsync/setup-dualnic-routing.sh
+    echo -e "${GREEN}✓${NC} Dual-NIC helper installed to /opt/ucxsync/setup-dualnic-routing.sh"
+else
+    echo -e "${YELLOW}⚠${NC}  setup-dualnic-routing.sh not found, helper was not installed"
 fi
 
 echo ""
@@ -349,6 +490,8 @@ if [ "$INSTALL_MODE" = "dual" ]; then
 fi
 systemctl daemon-reload
 echo -e "${GREEN}✓${NC} Service installed"
+
+install_dualnic_routing
 
 echo ""
 echo "Setting permissions..."
@@ -379,6 +522,9 @@ if [ "$INSTALL_MODE" = "dual" ]; then
 else
     echo -e "${BLUE}Configuration:${NC} /etc/ucxsync/config.yaml"
     echo -e "${BLUE}Service file:${NC} /etc/systemd/system/ucxsync.service"
+fi
+if [ "$INSTALL_DUALNIC_ROUTING" -eq 1 ]; then
+    echo -e "${BLUE}Routing helper:${NC} /opt/ucxsync/setup-dualnic-routing.sh + /etc/systemd/system/ucxsync-dualnic-routing.service"
 fi
 echo ""
 echo -e "${YELLOW}========================================${NC}"
@@ -429,6 +575,7 @@ if [ "$INSTALL_MODE" = "dual" ]; then
     echo ""
     echo "3. ${BLUE}Install dual-NIC routing helper (recommended):${NC}"
     echo "   sudo END0_IFACE=end0 END1_IFACE=end1 END0_SRC_IP=192.168.200.101 END1_SRC_IP=192.168.200.102 END0_HOSTS=\"1 2 3 4 5 6 7\" END1_HOSTS=\"8 9 10 11 12 13 201\" /opt/ucxsync/setup-dualnic-routing.sh --install"
+    echo "   or install it during setup with: sudo ./install.sh --dual --install-dualnic-routing"
     echo ""
     echo "4. ${BLUE}Enable auto-start:${NC}"
     echo "   sudo systemctl enable ucxsync@a ucxsync@b"
@@ -461,6 +608,9 @@ else
     echo ""
     echo "3. ${BLUE}Enable auto-start:${NC}"
     echo "   sudo systemctl enable ucxsync"
+    echo ""
+    echo "   If you want host-based interface pinning in single mode, you can also install routing:"
+    echo "   sudo END0_IFACE=end0 END1_IFACE=enx00e04c141b68 END0_SRC_IP=192.168.200.101 END1_SRC_IP=192.168.200.103 /opt/ucxsync/setup-dualnic-routing.sh --install"
     echo ""
     echo "4. ${BLUE}Start service:${NC}"
     echo "   sudo systemctl start ucxsync"

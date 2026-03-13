@@ -116,3 +116,61 @@ type WSMessage struct {
 	Type    string      `json:"type"`
 	Payload interface{} `json:"payload"`
 }
+
+// DashboardInstanceConfig describes one instance connected to the shared dashboard.
+type DashboardInstanceConfig struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// DashboardConfig describes the shared dashboard mode.
+type DashboardConfig struct {
+	Enabled   bool                      `json:"enabled"`
+	Instances []DashboardInstanceConfig `json:"instances"`
+}
+
+// DashboardInstanceState contains the last known state of one UCXSync instance.
+type DashboardInstanceState struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	URL       string     `json:"url"`
+	Available bool       `json:"available"`
+	Error     string     `json:"error,omitempty"`
+	Status    SyncStatus `json:"status"`
+}
+
+// DashboardSummary contains aggregate counters across all configured instances.
+type DashboardSummary struct {
+	ConfiguredInstances      int `json:"configured_instances"`
+	AvailableInstances       int `json:"available_instances"`
+	RunningInstances         int `json:"running_instances"`
+	TotalCompletedCaptures   int `json:"total_completed_captures"`
+	TotalCompletedTest       int `json:"total_completed_test_captures"`
+	TotalActiveFileOps       int `json:"total_active_file_operations"`
+	TotalMaxParallelism      int `json:"total_max_parallelism"`
+	TotalActiveTasks         int `json:"total_active_tasks"`
+}
+
+// DashboardOverview is the main payload used by the shared dashboard UI.
+type DashboardOverview struct {
+	Config      DashboardConfig     `json:"config"`
+	HostMetrics PerformanceMetrics  `json:"host_metrics"`
+	Summary     DashboardSummary    `json:"summary"`
+	Instances   []DashboardInstanceState `json:"instances"`
+}
+
+// DashboardActionResult contains the result of one proxied action.
+type DashboardActionResult struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Success   bool   `json:"success"`
+	StatusCode int   `json:"status_code,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// DashboardActionResponse contains results for an action fan-out across instances.
+type DashboardActionResponse struct {
+	Action  string                  `json:"action"`
+	Results []DashboardActionResult `json:"results"`
+}

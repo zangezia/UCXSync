@@ -158,6 +158,119 @@ h2 {
     gap: 15px;
 }
 
+.instances-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 15px;
+}
+
+.instance-card {
+    background: var(--dark-bg);
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.instance-card.unavailable {
+    border-color: rgba(244, 67, 54, 0.7);
+}
+
+.instance-card.running {
+    border-color: rgba(76, 175, 80, 0.8);
+    box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.15);
+}
+
+.instance-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.instance-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.instance-url {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    word-break: break-all;
+}
+
+.instance-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    background: rgba(33, 150, 243, 0.15);
+    color: var(--secondary-color);
+}
+
+.instance-badge.running {
+    background: rgba(76, 175, 80, 0.18);
+    color: var(--success-color);
+}
+
+.instance-badge.stopped {
+    background: rgba(255, 152, 0, 0.18);
+    color: var(--warning-color);
+}
+
+.instance-badge.error {
+    background: rgba(244, 67, 54, 0.18);
+    color: var(--danger-color);
+}
+
+.instance-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.instance-stat {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.instance-stat-label {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    margin-bottom: 4px;
+}
+
+.instance-stat-value {
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 600;
+    word-break: break-word;
+}
+
+.instance-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.instance-actions .btn {
+    padding: 8px 12px;
+    font-size: 0.9rem;
+}
+
+.instance-error {
+    color: var(--danger-color);
+    font-size: 0.9rem;
+}
+
 .status-card {
     background: var(--dark-bg);
     padding: 15px;
@@ -356,7 +469,9 @@ footer {
     }
 
     .metrics-grid,
-    .status-grid {
+    .status-grid,
+    .instances-grid,
+    .instance-grid {
         grid-template-columns: 1fr;
     }
 

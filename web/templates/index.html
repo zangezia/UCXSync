@@ -72,9 +72,14 @@
                 </div>
             </section>
 
+            <section class="instances-panel" id="instances-panel" hidden>
+                <h2>Инстансы UCXSync</h2>
+                <div class="instances-grid" id="instances-grid"></div>
+            </section>
+
             <!-- Performance Metrics -->
             <section class="metrics-panel">
-                <h2>Производительность</h2>
+                <h2 id="metrics-title">Производительность</h2>
                 <div class="metrics-grid">
                     <div class="metric-card">
                         <div class="metric-label">CPU</div>
@@ -143,6 +148,7 @@
                     <table id="activity-table">
                         <thead>
                             <tr>
+                                <th>Инстанс</th>
                                 <th>Узел</th>
                                 <th>Шара</th>
                                 <th>Статус</th>
@@ -153,7 +159,7 @@
                         </thead>
                         <tbody id="activity-body">
                             <tr>
-                                <td colspan="6" class="no-data">Нет активных задач</td>
+                                <td colspan="7" class="no-data">Нет активных задач</td>
                             </tr>
                         </tbody>
                     </table>

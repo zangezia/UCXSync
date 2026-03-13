@@ -44,6 +44,15 @@ sync:
 web:
   host: 0.0.0.0  # Listen on all interfaces
   port: 8080
+  # Optional shared dashboard (typically configured only on instance A in dual mode)
+  # dashboard:
+  #   instances:
+  #     - id: a
+  #       name: Instance A
+  #       url: http://127.0.0.1:8080
+  #     - id: b
+  #       name: Instance B
+  #       url: http://127.0.0.1:8081
 
 # Monitoring
 monitoring:
@@ -63,4 +72,6 @@ logging:
 
 # Notes:
 # - For two UCXSync instances, assign each instance its own network.mount_root and web.port.
+# - The shared dashboard is enabled via web.dashboard.instances on one instance only.
+# - Host routing helper can be installed from install.sh with --install-dualnic-routing.
 # - Block-device management in the web UI also assumes Linux system tools.

@@ -1,9 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -40,6 +42,7 @@ type Server struct {
 	netService  *network.Service
 	serviceName string
 	webRoot     string
+	httpClient  *http.Client
 
 	mu      sync.RWMutex
 	clients map[*websocket.Conn]bool
@@ -108,6 +111,9 @@ func NewServer(cfg *config.Config) *Server {
 		netService:  netService,
 		serviceName: getServiceName(),
 		webRoot:     getWebRoot(),
+		httpClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
 		clients:     make(map[*websocket.Conn]bool),
 	}
 }
@@ -144,8 +150,17 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/shares/mount", s.handleMountShares)
 	mux.HandleFunc("/api/service/restart", s.handleRestartService)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
+	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("/api/sync/start", s.handleStartSync)
 	mux.HandleFunc("/api/sync/stop", s.handleStopSync)
+	mux.HandleFunc("/api/dashboard/config", s.handleDashboardConfig)
+	mux.HandleFunc("/api/dashboard/overview", s.handleDashboardOverview)
+	mux.HandleFunc("/api/dashboard/projects", s.handleDashboardProjects)
+	mux.HandleFunc("/api/dashboard/destinations", s.handleDashboardDestinations)
+	mux.HandleFunc("/api/dashboard/sync/start", s.handleDashboardStartSync)
+	mux.HandleFunc("/api/dashboard/sync/stop", s.handleDashboardStopSync)
+	mux.HandleFunc("/api/dashboard/shares/mount", s.handleDashboardMountShares)
+	mux.HandleFunc("/api/dashboard/service/restart", s.handleDashboardRestartService)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 
 	addr := fmt.Sprintf("%s:%d", s.cfg.Web.Host, s.cfg.Web.Port)
@@ -229,6 +244,18 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+func (s *Server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	metrics := s.monService.GetMetrics()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
 }
 
 func (s *Server) handleStartSync(w http.ResponseWriter, r *http.Request) {
@@ -645,6 +672,385 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
+}
+
+func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.dashboardConfig())
+}
+
+func (s *Server) handleDashboardOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.dashboardEnabled() {
+		http.Error(w, "Dashboard mode is not configured", http.StatusNotFound)
+		return
+	}
+
+	overview := models.DashboardOverview{
+		Config:      s.dashboardConfig(),
+		HostMetrics: s.monService.GetMetrics(),
+		Instances:   s.collectDashboardStates(r.Context()),
+	}
+
+	overview.Summary = s.buildDashboardSummary(overview.Instances)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(overview)
+}
+
+func (s *Server) handleDashboardProjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.dashboardEnabled() {
+		http.Error(w, "Dashboard mode is not configured", http.StatusNotFound)
+		return
+	}
+
+	type projectAccumulator struct {
+		name    string
+		sources map[string]struct{}
+	}
+
+	projectsByName := make(map[string]*projectAccumulator)
+	for _, instance := range s.cfg.Web.Dashboard.Instances {
+		var remoteProjects []models.ProjectInfo
+		if _, err := s.proxyJSON(r.Context(), http.MethodGet, instance.URL, "/api/projects", nil, &remoteProjects); err != nil {
+			continue
+		}
+
+		for _, project := range remoteProjects {
+			acc, ok := projectsByName[project.Name]
+			if !ok {
+				acc = &projectAccumulator{name: project.Name, sources: make(map[string]struct{})}
+				projectsByName[project.Name] = acc
+			}
+			sourceLabel := instance.Name
+			if project.Source != "" {
+				sourceLabel = fmt.Sprintf("%s (%s)", instance.Name, project.Source)
+			}
+			acc.sources[sourceLabel] = struct{}{}
+		}
+	}
+
+	projects := make([]models.ProjectInfo, 0, len(projectsByName))
+	for _, acc := range projectsByName {
+		sources := make([]string, 0, len(acc.sources))
+		for source := range acc.sources {
+			sources = append(sources, source)
+		}
+		sort.Strings(sources)
+		projects = append(projects, models.ProjectInfo{Name: acc.name, Source: strings.Join(sources, ", ")})
+	}
+
+	sort.Slice(projects, func(i, j int) bool { return projects[i].Name < projects[j].Name })
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(projects)
+}
+
+func (s *Server) handleDashboardDestinations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.dashboardEnabled() {
+		http.Error(w, "Dashboard mode is not configured", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.getAvailableDestinations())
+}
+
+func (s *Server) handleDashboardStartSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.dashboardEnabled() {
+		http.Error(w, "Dashboard mode is not configured", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Project        string   `json:"project"`
+		Destination    string   `json:"destination"`
+		MaxParallelism int      `json:"max_parallelism"`
+		Targets        []string `json:"targets"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.Project == "" || req.Destination == "" {
+		http.Error(w, "Project and destination are required", http.StatusBadRequest)
+		return
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"project":         req.Project,
+		"destination":     req.Destination,
+		"max_parallelism": req.MaxParallelism,
+	})
+	if err != nil {
+		http.Error(w, "Failed to build request", http.StatusInternalServerError)
+		return
+	}
+
+	s.respondDashboardAction(w, r, "sync/start", http.MethodPost, "/api/sync/start", body, req.Targets)
+}
+
+func (s *Server) handleDashboardStopSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.dashboardEnabled() {
+		http.Error(w, "Dashboard mode is not configured", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Targets []string `json:"targets"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	s.respondDashboardAction(w, r, "sync/stop", http.MethodPost, "/api/sync/stop", nil, req.Targets)
+}
+
+func (s *Server) handleDashboardMountShares(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.dashboardEnabled() {
+		http.Error(w, "Dashboard mode is not configured", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Targets []string `json:"targets"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	s.respondDashboardAction(w, r, "shares/mount", http.MethodPost, "/api/shares/mount", nil, req.Targets)
+}
+
+func (s *Server) handleDashboardRestartService(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.dashboardEnabled() {
+		http.Error(w, "Dashboard mode is not configured", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Targets []string `json:"targets"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	s.respondDashboardAction(w, r, "service/restart", http.MethodPost, "/api/service/restart", nil, req.Targets)
+}
+
+func (s *Server) dashboardEnabled() bool {
+	return len(s.cfg.Web.Dashboard.Instances) > 0
+}
+
+func (s *Server) dashboardConfig() models.DashboardConfig {
+	instances := make([]models.DashboardInstanceConfig, 0, len(s.cfg.Web.Dashboard.Instances))
+	for _, instance := range s.cfg.Web.Dashboard.Instances {
+		instances = append(instances, models.DashboardInstanceConfig{
+			ID:   instance.ID,
+			Name: instance.Name,
+			URL:  instance.URL,
+		})
+	}
+
+	return models.DashboardConfig{
+		Enabled:   len(instances) > 0,
+		Instances: instances,
+	}
+}
+
+func (s *Server) collectDashboardStates(ctx context.Context) []models.DashboardInstanceState {
+	states := make([]models.DashboardInstanceState, len(s.cfg.Web.Dashboard.Instances))
+	var wg sync.WaitGroup
+
+	for i, instance := range s.cfg.Web.Dashboard.Instances {
+		wg.Add(1)
+		go func(index int, inst config.DashboardInstance) {
+			defer wg.Done()
+
+			state := models.DashboardInstanceState{
+				ID:   inst.ID,
+				Name: inst.Name,
+				URL:  inst.URL,
+			}
+
+			var status models.SyncStatus
+			if _, err := s.proxyJSON(ctx, http.MethodGet, inst.URL, "/api/status", nil, &status); err != nil {
+				state.Available = false
+				state.Error = err.Error()
+			} else {
+				state.Available = true
+				state.Status = status
+			}
+
+			states[index] = state
+		}(i, instance)
+	}
+
+	wg.Wait()
+	return states
+}
+
+func (s *Server) buildDashboardSummary(states []models.DashboardInstanceState) models.DashboardSummary {
+	summary := models.DashboardSummary{
+		ConfiguredInstances: len(states),
+	}
+
+	for _, state := range states {
+		if state.Available {
+			summary.AvailableInstances++
+		}
+		if state.Status.IsRunning {
+			summary.RunningInstances++
+		}
+		summary.TotalCompletedCaptures += state.Status.CompletedCaptures
+		summary.TotalCompletedTest += state.Status.CompletedTestCaptures
+		summary.TotalActiveFileOps += state.Status.ActiveFileOperations
+		summary.TotalMaxParallelism += state.Status.MaxParallelism
+		summary.TotalActiveTasks += len(state.Status.ActiveTasks)
+	}
+
+	return summary
+}
+
+func (s *Server) respondDashboardAction(w http.ResponseWriter, r *http.Request, action, method, apiPath string, body []byte, targets []string) {
+	results, err := s.dispatchDashboardAction(r.Context(), method, apiPath, body, targets)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(models.DashboardActionResponse{
+		Action:  action,
+		Results: results,
+	})
+}
+
+func (s *Server) dispatchDashboardAction(ctx context.Context, method, apiPath string, body []byte, targetIDs []string) ([]models.DashboardActionResult, error) {
+	targets, err := s.selectDashboardTargets(targetIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]models.DashboardActionResult, len(targets))
+	var wg sync.WaitGroup
+
+	for i, instance := range targets {
+		wg.Add(1)
+		go func(index int, inst config.DashboardInstance) {
+			defer wg.Done()
+
+			result := models.DashboardActionResult{ID: inst.ID, Name: inst.Name}
+			statusCode, err := s.proxyJSON(ctx, method, inst.URL, apiPath, body, nil)
+			result.StatusCode = statusCode
+			if err != nil {
+				result.Success = false
+				result.Error = err.Error()
+			} else {
+				result.Success = true
+			}
+
+			results[index] = result
+		}(i, instance)
+	}
+
+	wg.Wait()
+	return results, nil
+}
+
+func (s *Server) selectDashboardTargets(targetIDs []string) ([]config.DashboardInstance, error) {
+	if !s.dashboardEnabled() {
+		return nil, fmt.Errorf("dashboard mode is not configured")
+	}
+
+	if len(targetIDs) == 0 {
+		return append([]config.DashboardInstance(nil), s.cfg.Web.Dashboard.Instances...), nil
+	}
+
+	lookup := make(map[string]config.DashboardInstance, len(s.cfg.Web.Dashboard.Instances))
+	for _, instance := range s.cfg.Web.Dashboard.Instances {
+		lookup[instance.ID] = instance
+	}
+
+	selected := make([]config.DashboardInstance, 0, len(targetIDs))
+	for _, id := range targetIDs {
+		instance, ok := lookup[id]
+		if !ok {
+			return nil, fmt.Errorf("unknown dashboard target: %s", id)
+		}
+		selected = append(selected, instance)
+	}
+
+	return selected, nil
+}
+
+func (s *Server) proxyJSON(ctx context.Context, method, baseURL, apiPath string, body []byte, out interface{}) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(baseURL, "/")+apiPath, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		trimmed := strings.TrimSpace(string(message))
+		if trimmed == "" {
+			trimmed = resp.Status
+		}
+		return resp.StatusCode, fmt.Errorf(trimmed)
+	}
+
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return resp.StatusCode, err
+		}
+	}
+
+	return resp.StatusCode, nil
 }
 
 // getBlockDevices returns list of all block devices using lsblk

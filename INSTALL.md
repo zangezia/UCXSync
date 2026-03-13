@@ -54,14 +54,41 @@ You can explicitly choose the installation mode:
 # Main version (single instance)
 sudo ./install.sh --single
 
+# Main version + dual-NIC routing helper
+sudo ./install.sh --single --install-dualnic-routing
+
 # Dual version (two instances: ucxsync@a + ucxsync@b)
 sudo ./install.sh --dual
+
+# Dual version + routing helper installed immediately
+sudo ./install.sh --dual --install-dualnic-routing
 
 # Equivalent explicit form
 sudo ./install.sh --mode dual
 ```
 
+For custom interface names and source IPs, pass environment overrides into the installer. Example:
+
+```bash
+sudo END0_IFACE=end0 \
+  END1_IFACE=enx00e04c141b68 \
+  END0_SRC_IP=192.168.200.101 \
+  END1_SRC_IP=192.168.200.103 \
+  END0_HOSTS="1 2 3 4 5 6 7" \
+  END1_HOSTS="8 9 10 11 12 13 201" \
+  ./install.sh --single --install-dualnic-routing
+```
+
 When run interactively without flags, the script will ask which version to install.
+
+If you enable dual-NIC routing in interactive mode, the installer also launches a small wizard that asks for:
+
+- primary interface name;
+- secondary interface name;
+- source IPv4 for each interface;
+- which UCX hosts should be routed via each interface.
+
+So for common cases like `end0 + enx00e04c141b68`, you can just answer the prompts instead of building a long command line.
 
 The script will:
 - Check and install prerequisites
@@ -87,6 +114,12 @@ In **dual** mode it installs:
 - `/etc/systemd/system/ucxsync@.service`
 - mount roots `/ucmount-a` and `/ucmount-b`
 - helper `/opt/ucxsync/setup-dualnic-routing.sh`
+
+If `--install-dualnic-routing` is provided, the installer also runs the helper and enables:
+
+- `/etc/systemd/system/ucxsync-dualnic-routing.service`
+- `/etc/sysctl.d/99-ucxsync-dualnic.conf`
+- service ordering drop-ins for `ucxsync.service` and `ucxsync@.service`
 
 ### Method 2: Manual Installation
 
@@ -181,13 +214,13 @@ Recommended split:
   - nodes: `WU01`-`WU07`
   - interface: `end0`
   - mount root: `/ucmount-a`
-  - web UI: `:8080`
+  - web UI: `:8080` (**shared dashboard host**)
   - log file: `/var/log/ucxsync/ucxsync-a.log`
 - **Instance B**
   - nodes: `WU08`-`WU13` and `CU`
   - interface: `end1`
   - mount root: `/ucmount-b`
-  - web UI: `:8081`
+  - web UI: `:8081` (direct fallback / instance-local UI)
   - log file: `/var/log/ucxsync/ucxsync-b.log`
 
 Both instances may write to the same destination, for example `/ucdata`, but they must use different:
@@ -213,6 +246,24 @@ This model helps because:
 2. traffic is pinned to the intended NIC by host routes;
 3. each process has its own worker pool and restart lifecycle;
 4. mount trees are isolated, so the two instances do not fight over `/ucmount`.
+
+### Shared dashboard
+
+The dual deployment can now expose **one common dashboard**.
+
+Recommended layout:
+
+- `ucxsync@a` on `:8080` serves the **shared dashboard**
+- `ucxsync@b` on `:8081` remains available as a direct instance UI and fallback endpoint
+
+The shared dashboard on instance A:
+
+- collects status from both instances;
+- shows host performance once (CPU, RAM, disk, network);
+- merges active tasks into one table;
+- allows starting, stopping, remounting shares, and restarting services for both instances from one page.
+
+This is enabled in `config.instance-a.yaml` through `web.dashboard.instances`.
 
 ### Recommended filesystem and service layout
 
@@ -244,10 +295,12 @@ This model helps because:
 1. Install the dual version directly:
 
 ```bash
-sudo ./install.sh --dual
+sudo ./install.sh --dual --install-dualnic-routing
 ```
 
 If you already ran the default installation, you can re-run the installer in dual mode safely; existing configs are not overwritten.
+
+If you prefer to install routing later, omit `--install-dualnic-routing` and run the helper manually.
 
 2. Create separate mount roots:
 
@@ -274,6 +327,7 @@ Check that:
 
 - `a.yaml` uses `/ucmount-a` and port `8080`
 - `b.yaml` uses `/ucmount-b` and port `8081`
+- `a.yaml` contains `web.dashboard.instances` for both `http://127.0.0.1:8080` and `http://127.0.0.1:8081`
 - node lists do not overlap
 - log files are different
 
@@ -284,7 +338,7 @@ sudo cp ucxsync@.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
-6. Install dual-NIC routing before starting the instances:
+6. Install dual-NIC routing before starting the instances (skip if you already used `--install-dualnic-routing`):
 
 ```bash
 sudo END0_IFACE=end0 \
@@ -341,6 +395,18 @@ sudo systemctl start ucxsync
 sudo systemctl status ucxsync
 ```
 
+If you want interface pinning in single-instance mode, you can install the routing helper either during install or later:
+
+```bash
+sudo END0_IFACE=end0 \
+  END1_IFACE=enx00e04c141b68 \
+  END0_SRC_IP=192.168.200.101 \
+  END1_SRC_IP=192.168.200.103 \
+  END0_HOSTS="1 2 3 4 5 6 7" \
+  END1_HOSTS="8 9 10 11 12 13 201" \
+  /opt/ucxsync/setup-dualnic-routing.sh --install
+```
+
 ### Start two-instance deployment
 
 ```bash
@@ -350,6 +416,18 @@ sudo systemctl enable --now ucxsync@b
 
 sudo systemctl status ucxsync@a
 sudo systemctl status ucxsync@b
+```
+
+Access the shared dashboard at:
+
+```text
+http://<server-ip>:8080
+```
+
+Direct per-instance fallback UI remains available at:
+
+```text
+http://<server-ip>:8081
 ```
 
 ### View Logs

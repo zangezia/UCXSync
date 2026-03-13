@@ -44,6 +44,15 @@ sync:
 web:
   host: 0.0.0.0  # Listen on all interfaces for remote access
   port: 8080
+  # Optional shared dashboard for dual deployment:
+  # dashboard:
+  #   instances:
+  #     - id: a
+  #       name: Instance A
+  #       url: http://127.0.0.1:8080
+  #     - id: b
+  #       name: Instance B
+  #       url: http://127.0.0.1:8081
 
 # Monitoring (tuned for Orange Pi hardware)
 monitoring:
@@ -70,3 +79,4 @@ logging:
 # - Network: Use wired Ethernet for stability
 # - CPU: Spacemit K1 (8-core RISC-V @ 2.0GHz)
 # - For two instances, use different network.mount_root values such as /ucmount-a and /ucmount-b
+# - Dual-NIC routing can be installed during setup with --install-dualnic-routing

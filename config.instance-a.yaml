@@ -31,6 +31,14 @@ sync:
 web:
   host: 0.0.0.0
   port: 8080
+  dashboard:
+    instances:
+      - id: a
+        name: Instance A
+        url: http://127.0.0.1:8080
+      - id: b
+        name: Instance B
+        url: http://127.0.0.1:8081
 
 monitoring:
   performance_update_interval: 1s

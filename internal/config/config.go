@@ -45,8 +45,21 @@ type Sync struct {
 
 // Web holds web server settings
 type Web struct {
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
+	Host      string        `mapstructure:"host"`
+	Port      int           `mapstructure:"port"`
+	Dashboard WebDashboard  `mapstructure:"dashboard"`
+}
+
+// WebDashboard holds optional multi-instance dashboard settings.
+type WebDashboard struct {
+	Instances []DashboardInstance `mapstructure:"instances"`
+}
+
+// DashboardInstance describes one UCXSync instance shown in the shared dashboard.
+type DashboardInstance struct {
+	ID   string `mapstructure:"id"`
+	Name string `mapstructure:"name"`
+	URL  string `mapstructure:"url"`
 }
 
 // Monitoring holds monitoring settings
@@ -136,6 +149,7 @@ func setDefaults(v *viper.Viper) {
 	// Web defaults
 	v.SetDefault("web.host", "localhost")
 	v.SetDefault("web.port", 8080)
+	v.SetDefault("web.dashboard.instances", []map[string]any{})
 
 	// Monitoring defaults
 	v.SetDefault("monitoring.performance_update_interval", "1s")
@@ -181,6 +195,35 @@ func (c *Config) Validate() error {
 
 	if c.Web.Port < 1 || c.Web.Port > 65535 {
 		return fmt.Errorf("invalid port: %d", c.Web.Port)
+	}
+
+	seenDashboardIDs := make(map[string]struct{}, len(c.Web.Dashboard.Instances))
+	for i := range c.Web.Dashboard.Instances {
+		inst := &c.Web.Dashboard.Instances[i]
+		inst.ID = strings.TrimSpace(inst.ID)
+		inst.Name = strings.TrimSpace(inst.Name)
+		inst.URL = strings.TrimRight(strings.TrimSpace(inst.URL), "/")
+
+		if inst.ID == "" {
+			return fmt.Errorf("web.dashboard.instances[%d].id must not be empty", i)
+		}
+
+		if _, exists := seenDashboardIDs[inst.ID]; exists {
+			return fmt.Errorf("web.dashboard.instances[%d].id duplicates %q", i, inst.ID)
+		}
+		seenDashboardIDs[inst.ID] = struct{}{}
+
+		if inst.Name == "" {
+			inst.Name = inst.ID
+		}
+
+		if inst.URL == "" {
+			return fmt.Errorf("web.dashboard.instances[%d].url must not be empty", i)
+		}
+
+		if !strings.HasPrefix(inst.URL, "http://") && !strings.HasPrefix(inst.URL, "https://") {
+			return fmt.Errorf("web.dashboard.instances[%d].url must start with http:// or https://: %s", i, inst.URL)
+		}
 	}
 
 	return nil

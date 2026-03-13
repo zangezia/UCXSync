@@ -1,5 +1,6 @@
 # Example configuration for UCXSync instance B
-# Split nodes, port, mount root, and log file from instance A
+# Split nodes, port, mount root, and log file from instance A.
+# Shared dashboard is typically configured only on instance A.
 
 nodes:
   - WU08
