@@ -96,7 +96,7 @@ prompt_value() {
     local default_value="$2"
     local result
 
-    printf "%s [%s]: " "$prompt" "$default_value"
+    printf "%s [%s]: " "$prompt" "$default_value" >&2
     read -r result
     if [ -z "$result" ]; then
         result="$default_value"
