@@ -45,9 +45,9 @@ type Sync struct {
 
 // Web holds web server settings
 type Web struct {
-	Host      string        `mapstructure:"host"`
-	Port      int           `mapstructure:"port"`
-	Dashboard WebDashboard  `mapstructure:"dashboard"`
+	Host      string       `mapstructure:"host"`
+	Port      int          `mapstructure:"port"`
+	Dashboard WebDashboard `mapstructure:"dashboard"`
 }
 
 // WebDashboard holds optional multi-instance dashboard settings.

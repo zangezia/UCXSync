@@ -114,7 +114,7 @@ func NewServer(cfg *config.Config) *Server {
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		clients:     make(map[*websocket.Conn]bool),
+		clients: make(map[*websocket.Conn]bool),
 	}
 }
 

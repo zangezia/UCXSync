@@ -142,31 +142,31 @@ type DashboardInstanceState struct {
 
 // DashboardSummary contains aggregate counters across all configured instances.
 type DashboardSummary struct {
-	ConfiguredInstances      int `json:"configured_instances"`
-	AvailableInstances       int `json:"available_instances"`
-	RunningInstances         int `json:"running_instances"`
-	TotalCompletedCaptures   int `json:"total_completed_captures"`
-	TotalCompletedTest       int `json:"total_completed_test_captures"`
-	TotalActiveFileOps       int `json:"total_active_file_operations"`
-	TotalMaxParallelism      int `json:"total_max_parallelism"`
-	TotalActiveTasks         int `json:"total_active_tasks"`
+	ConfiguredInstances    int `json:"configured_instances"`
+	AvailableInstances     int `json:"available_instances"`
+	RunningInstances       int `json:"running_instances"`
+	TotalCompletedCaptures int `json:"total_completed_captures"`
+	TotalCompletedTest     int `json:"total_completed_test_captures"`
+	TotalActiveFileOps     int `json:"total_active_file_operations"`
+	TotalMaxParallelism    int `json:"total_max_parallelism"`
+	TotalActiveTasks       int `json:"total_active_tasks"`
 }
 
 // DashboardOverview is the main payload used by the shared dashboard UI.
 type DashboardOverview struct {
-	Config      DashboardConfig     `json:"config"`
-	HostMetrics PerformanceMetrics  `json:"host_metrics"`
-	Summary     DashboardSummary    `json:"summary"`
+	Config      DashboardConfig          `json:"config"`
+	HostMetrics PerformanceMetrics       `json:"host_metrics"`
+	Summary     DashboardSummary         `json:"summary"`
 	Instances   []DashboardInstanceState `json:"instances"`
 }
 
 // DashboardActionResult contains the result of one proxied action.
 type DashboardActionResult struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Success   bool   `json:"success"`
-	StatusCode int   `json:"status_code,omitempty"`
-	Error     string `json:"error,omitempty"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Success    bool   `json:"success"`
+	StatusCode int    `json:"status_code,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // DashboardActionResponse contains results for an action fan-out across instances.
