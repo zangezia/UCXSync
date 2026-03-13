@@ -71,6 +71,25 @@ func main() {
 	}
 }
 
+func applyCLIOverrides(cmd *cobra.Command, cfg *config.Config) {
+	if project, _ := cmd.Flags().GetString("project"); project != "" {
+		cfg.Sync.Project = project
+	}
+	if dest, _ := cmd.Flags().GetString("dest"); dest != "" {
+		cfg.Sync.Destination = dest
+	}
+	if cmd.Flags().Changed("port") {
+		if port, _ := cmd.Flags().GetInt("port"); port != 0 {
+			cfg.Web.Port = port
+		}
+	}
+	if cmd.Flags().Changed("parallelism") {
+		if parallelism, _ := cmd.Flags().GetInt("parallelism"); parallelism != 0 {
+			cfg.Sync.MaxParallelism = parallelism
+		}
+	}
+}
+
 func runApp(cmd *cobra.Command, args []string) {
 	// Setup logging
 	setupLogging()
@@ -86,19 +105,8 @@ func runApp(cmd *cobra.Command, args []string) {
 		log.Fatal().Err(err).Msg("Failed to load configuration")
 	}
 
-	// Override config with command-line flags
-	if project, _ := cmd.Flags().GetString("project"); project != "" {
-		cfg.Sync.Project = project
-	}
-	if dest, _ := cmd.Flags().GetString("dest"); dest != "" {
-		cfg.Sync.Destination = dest
-	}
-	if port, _ := cmd.Flags().GetInt("port"); port != 0 {
-		cfg.Web.Port = port
-	}
-	if parallelism, _ := cmd.Flags().GetInt("parallelism"); parallelism != 0 {
-		cfg.Sync.MaxParallelism = parallelism
-	}
+	// Override config with command-line flags that were explicitly provided.
+	applyCLIOverrides(cmd, cfg)
 
 	// Display startup banner
 	log.Info().Msg("========================================")
