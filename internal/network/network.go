@@ -18,6 +18,7 @@ type Service struct {
 	username     string
 	password     string
 	baseMountDir string
+	mountOptions []string
 
 	mu      sync.Mutex
 	mounted map[string]bool // track mounted shares
@@ -31,6 +32,7 @@ func New(nodes, shares []string, username, password string) *Service {
 		username:     username,
 		password:     password,
 		baseMountDir: "/ucmount",
+		mountOptions: nil,
 		mounted:      make(map[string]bool),
 	}
 }
@@ -40,6 +42,13 @@ func (s *Service) SetBaseMountDir(dir string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.baseMountDir = dir
+}
+
+// SetMountOptions sets additional comma-separated mount.cifs options from config.
+func (s *Service) SetMountOptions(options []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mountOptions = append([]string(nil), options...)
 }
 
 // MountAll mounts all network shares
@@ -165,7 +174,20 @@ func (s *Service) mountShare(uncPath, mountPoint, credFile string) error {
 		"-o",
 	}
 
-	// Build options
+	opts := s.buildMountOptions(credFile)
+
+	args = append(args, strings.Join(opts, ","))
+
+	cmd := exec.Command("mount", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mount failed: %w (output: %s)", err, string(output))
+	}
+
+	return nil
+}
+
+func (s *Service) buildMountOptions(credFile string) []string {
 	opts := []string{
 		"rw",
 		"file_mode=0755",
@@ -179,18 +201,28 @@ func (s *Service) mountShare(uncPath, mountPoint, credFile string) error {
 		opts = append(opts, fmt.Sprintf("password=%s", s.password))
 	}
 
-	// Minimal SMB1 options for Windows XP
-	opts = append(opts, "vers=1.0")
-
-	args = append(args, strings.Join(opts, ","))
-
-	cmd := exec.Command("mount", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("mount failed: %w (output: %s)", err, string(output))
+	hasVers := false
+	for _, opt := range s.mountOptions {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(opt)), "vers=") {
+			hasVers = true
+			break
+		}
 	}
 
-	return nil
+	if !hasVers {
+		// Minimal SMB1 default for legacy Windows XP sources.
+		opts = append(opts, "vers=1.0")
+	}
+
+	for _, opt := range s.mountOptions {
+		opt = strings.TrimSpace(opt)
+		if opt == "" {
+			continue
+		}
+		opts = append(opts, opt)
+	}
+
+	return opts
 }
 
 func (s *Service) unmountShare(mountPoint string) error {

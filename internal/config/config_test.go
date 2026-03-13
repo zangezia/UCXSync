@@ -46,6 +46,54 @@ func TestLoadSupportsCustomNetworkMountRoot(t *testing.T) {
 	}
 }
 
+func TestLoadSupportsCustomNetworkMountOptions(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.yaml")
+	configBody := strings.Join([]string{
+		"network:",
+		"  mount_root: /ucmount-a",
+		"  mount_options:",
+		"    - nounix",
+		"    - '  noserverino  '",
+		"    - actimeo=1",
+	}, "\n") + "\n"
+	if err := os.WriteFile(configPath, []byte(configBody), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := []string{"nounix", "noserverino", "actimeo=1"}
+	if strings.Join(cfg.Network.MountOptions, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected cleaned mount options %v, got %v", want, cfg.Network.MountOptions)
+	}
+}
+
+func TestLoadRejectsEmptyNetworkMountOption(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.yaml")
+	configBody := "network:\n  mount_root: /ucmount-a\n  mount_options:\n    - nounix\n    - '   '\n"
+	if err := os.WriteFile(configPath, []byte(configBody), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("expected Load to fail for empty network mount option")
+	}
+
+	if !strings.Contains(err.Error(), "network.mount_options") {
+		t.Fatalf("expected network.mount_options validation error, got %v", err)
+	}
+}
+
 func TestLoadRejectsRelativeNetworkMountRoot(t *testing.T) {
 	t.Parallel()
 

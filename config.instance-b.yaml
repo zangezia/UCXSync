@@ -21,6 +21,7 @@ credentials:
 
 network:
   mount_root: "/ucmount-b"
+  mount_options: []
 
 sync:
   destination: "/ucdata"

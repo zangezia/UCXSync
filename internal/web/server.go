@@ -103,6 +103,7 @@ func NewServer(cfg *config.Config) *Server {
 		cfg.Credentials.Password,
 	)
 	netService.SetBaseMountDir(cfg.Network.MountRoot)
+	netService.SetMountOptions(cfg.Network.MountOptions)
 
 	return &Server{
 		cfg:         cfg,
@@ -929,22 +930,42 @@ func (s *Server) buildDashboardSummary(states []models.DashboardInstanceState) m
 	summary := models.DashboardSummary{
 		ConfiguredInstances: len(states),
 	}
+	completedValues := make([]int, 0, len(states))
+	testValues := make([]int, 0, len(states))
 
 	for _, state := range states {
 		if state.Available {
 			summary.AvailableInstances++
+			completedValues = append(completedValues, state.Status.CompletedCaptures)
+			testValues = append(testValues, state.Status.CompletedTestCaptures)
 		}
 		if state.Status.IsRunning {
 			summary.RunningInstances++
 		}
-		summary.TotalCompletedCaptures += state.Status.CompletedCaptures
-		summary.TotalCompletedTest += state.Status.CompletedTestCaptures
 		summary.TotalActiveFileOps += state.Status.ActiveFileOperations
 		summary.TotalMaxParallelism += state.Status.MaxParallelism
 		summary.TotalActiveTasks += len(state.Status.ActiveTasks)
 	}
 
+	summary.TotalCompletedCaptures = minIntSlice(completedValues)
+	summary.TotalCompletedTest = minIntSlice(testValues)
+
 	return summary
+}
+
+func minIntSlice(values []int) int {
+	if len(values) == 0 {
+		return 0
+	}
+
+	min := values[0]
+	for _, value := range values[1:] {
+		if value < min {
+			min = value
+		}
+	}
+
+	return min
 }
 
 func (s *Server) respondDashboardAction(w http.ResponseWriter, r *http.Request, action, method, apiPath string, body []byte, targets []string) {

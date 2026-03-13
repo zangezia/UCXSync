@@ -30,7 +30,8 @@ type Credentials struct {
 
 // Network holds CIFS mount settings
 type Network struct {
-	MountRoot string `mapstructure:"mount_root"`
+	MountRoot    string   `mapstructure:"mount_root"`
+	MountOptions []string `mapstructure:"mount_options"`
 }
 
 // Sync holds synchronization settings
@@ -139,6 +140,7 @@ func setDefaults(v *viper.Viper) {
 
 	// Network defaults
 	v.SetDefault("network.mount_root", "/ucmount")
+	v.SetDefault("network.mount_options", []string{})
 
 	// Sync defaults
 	v.SetDefault("sync.max_parallelism", 8)
@@ -188,6 +190,16 @@ func (c *Config) Validate() error {
 	if c.Network.MountRoot == "/" {
 		return fmt.Errorf("network.mount_root must not be /")
 	}
+
+	cleanMountOptions := make([]string, 0, len(c.Network.MountOptions))
+	for i, opt := range c.Network.MountOptions {
+		opt = strings.TrimSpace(opt)
+		if opt == "" {
+			return fmt.Errorf("network.mount_options[%d] must not be empty", i)
+		}
+		cleanMountOptions = append(cleanMountOptions, opt)
+	}
+	c.Network.MountOptions = cleanMountOptions
 
 	if c.Sync.MaxParallelism < 1 {
 		return fmt.Errorf("max_parallelism must be at least 1")

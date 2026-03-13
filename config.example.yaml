@@ -30,6 +30,14 @@ credentials:
 # Network share mounting
 network:
   mount_root: "/ucmount"           # Change per instance, e.g. /ucmount-a and /ucmount-b
+  # Optional extra mount.cifs options for tuning legacy SMB sources.
+  # Test these one by one on your nodes; common candidates are:
+  #   nounix
+  #   noserverino
+  #   actimeo=1
+  #   rsize=65536
+  #   wsize=65536
+  mount_options: []
 
 # Synchronization settings
 sync:

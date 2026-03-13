@@ -119,7 +119,7 @@ func TestFormatCaptureSummaryIncludesRawQv(t *testing.T) {
 }
 
 func TestTrackCaptureCompletionWithRawQv(t *testing.T) {
-	nodes := []string{"WU01", "WU02", "WU03", "WU04", "WU05", "WU06", "WU07", "WU08", "WU09", "WU10", "WU11", "WU12", "WU13"}
+	nodes := []string{"WU01", "WU02", "WU03", "WU04", "WU05", "WU06", "WU07", "WU08", "WU09", "WU10", "WU11", "WU12", "WU13", "CU"}
 	svc := New(nodes, []string{"E$"}, "/ucmount")
 
 	for i, node := range nodes {
@@ -132,6 +132,44 @@ func TestTrackCaptureCompletionWithRawQv(t *testing.T) {
 
 	if got := atomic.LoadInt32(&svc.completedCaptures); got != 1 {
 		t.Fatalf("completedCaptures = %d, want 1", got)
+	}
+}
+
+func TestTrackCaptureCompletionCountsSplitInstanceWithoutCU(t *testing.T) {
+	t.Parallel()
+
+	nodes := []string{"WU01", "WU02", "WU03", "WU04", "WU05", "WU06", "WU07"}
+	svc := New(nodes, []string{"E$"}, "/ucmount-a")
+
+	for i, node := range nodes {
+		filename := fmt.Sprintf("Lvl00-00003-Project-%02d-00-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", i)
+		svc.trackCaptureCompletion(filename, node)
+	}
+
+	if got := atomic.LoadInt32(&svc.completedCaptures); got != 1 {
+		t.Fatalf("completedCaptures = %d, want 1", got)
+	}
+}
+
+func TestTrackCaptureCompletionCountsSplitInstanceWithCUXML(t *testing.T) {
+	t.Parallel()
+
+	nodes := []string{"WU08", "WU09", "WU10", "WU11", "WU12", "WU13", "CU"}
+	svc := New(nodes, []string{"E$"}, "/ucmount-b")
+
+	for i, node := range nodes[:6] {
+		filename := fmt.Sprintf("Lvl00-00004-Project-%02d-00-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", i)
+		svc.trackCaptureCompletion(filename, node)
+	}
+
+	if got := atomic.LoadInt32(&svc.completedCaptures); got != 0 {
+		t.Fatalf("completedCaptures before XML = %d, want 0", got)
+	}
+
+	svc.trackCaptureCompletion("EAD-00004-Project-ABCDEF01_2345_6789_ABCD_EF0123456789.xml", "CU")
+
+	if got := atomic.LoadInt32(&svc.completedCaptures); got != 1 {
+		t.Fatalf("completedCaptures after XML = %d, want 1", got)
 	}
 }
 

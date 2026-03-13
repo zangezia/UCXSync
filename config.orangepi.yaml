@@ -30,6 +30,7 @@ credentials:
 # Network share mounting
 network:
   mount_root: "/ucmount"
+  mount_options: []
 
 # Synchronization settings (optimized for Orange Pi RV2 RISC-V)
 sync:

@@ -327,6 +327,7 @@ Check that:
 
 - `a.yaml` uses `/ucmount-a` and port `8080`
 - `b.yaml` uses `/ucmount-b` and port `8081`
+- optional `network.mount_options` are consistent between instances if you tune CIFS
 - `a.yaml` contains `web.dashboard.instances` for both `http://127.0.0.1:8080` and `http://127.0.0.1:8081`
 - node lists do not overlap
 - log files are different
@@ -351,6 +352,56 @@ sudo END0_IFACE=end0 \
 ```
 
 The helper installs host routes and creates systemd ordering for both `ucxsync.service` and `ucxsync@.service`.
+
+### SMB/CIFS throughput tuning
+
+For legacy SMB1 sources, keep the default compatibility first and add tuning options gradually via `network.mount_options` in your config:
+
+```yaml
+network:
+  mount_root: /ucmount-a
+  mount_options:
+    - nounix
+    - noserverino
+    - actimeo=1
+    - rsize=65536
+    - wsize=65536
+```
+
+Notes:
+
+- `nounix` and `noserverino` are often helpful for old Windows/XP-style servers.
+- `actimeo=1` reduces metadata round-trips without making cache staleness too aggressive.
+- `rsize` / `wsize` should be tested on your specific UCX nodes; some SMB1 servers ignore them, others benefit from `65536`.
+- Do **not** enable risky caching options blindly on capture sources that may still be changing.
+
+### TCP buffer and IRQ affinity tuning
+
+The routing helper can also persist host-side TCP buffer tuning and pin interface IRQs to specific CPU cores.
+
+Example: keep `end0` IRQs on CPU 0 and `end1` IRQs on CPU 1:
+
+```bash
+sudo PIN_IRQS=1 \
+     END0_IRQ_CORES=0 \
+     END1_IRQ_CORES=1 \
+     NET_CORE_RMEM_MAX=134217728 \
+     NET_CORE_WMEM_MAX=134217728 \
+     TCP_RMEM="4096 262144 67108864" \
+     TCP_WMEM="4096 262144 67108864" \
+     NETDEV_MAX_BACKLOG=250000 \
+     END0_IFACE=end0 \
+     END1_IFACE=end1 \
+     END0_SRC_IP=192.168.200.101 \
+     END1_SRC_IP=192.168.200.102 \
+     END0_HOSTS="1 2 3 4 5 6 7" \
+     END1_HOSTS="8 9 10 11 12 13 201" \
+  /opt/ucxsync/setup-dualnic-routing.sh --install
+```
+
+The helper looks for IRQ labels containing the interface name in `/proc/interrupts` and writes the chosen CPU list into `/proc/irq/*/smp_affinity_list`.
+
+If `irqbalance` is running, it may later override manual affinity, so either disable it or configure it not to fight your pinning.
 
 7. Enable both instances:
 

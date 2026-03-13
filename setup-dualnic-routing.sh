@@ -20,6 +20,14 @@ END0_HOSTS_RAW="${END0_HOSTS:-1 2 3 4 5 6 7}"
 END1_HOSTS_RAW="${END1_HOSTS:-8 9 10 11 12 13 201}"
 IP_PREFIX="${IP_PREFIX:-192.168.200}"
 IP_WAIT_TIMEOUT="${IP_WAIT_TIMEOUT:-30}"
+NET_CORE_RMEM_MAX="${NET_CORE_RMEM_MAX:-134217728}"
+NET_CORE_WMEM_MAX="${NET_CORE_WMEM_MAX:-134217728}"
+TCP_RMEM="${TCP_RMEM:-4096 262144 67108864}"
+TCP_WMEM="${TCP_WMEM:-4096 262144 67108864}"
+NETDEV_MAX_BACKLOG="${NETDEV_MAX_BACKLOG:-250000}"
+PIN_IRQS="${PIN_IRQS:-0}"
+END0_IRQ_CORES="${END0_IRQ_CORES:-0}"
+END1_IRQ_CORES="${END1_IRQ_CORES:-1}"
 
 DRY_RUN=0
 MODE="apply"
@@ -63,8 +71,17 @@ Environment overrides:
   END0_HOSTS="1 2 3 4 5 6 7"
   END1_HOSTS="8 9 10 11 12 13 201"
   IP_PREFIX=192.168.200
+    NET_CORE_RMEM_MAX=134217728
+    NET_CORE_WMEM_MAX=134217728
+    TCP_RMEM="4096 262144 67108864"
+    TCP_WMEM="4096 262144 67108864"
+    NETDEV_MAX_BACKLOG=250000
+    PIN_IRQS=1
+    END0_IRQ_CORES=0
+    END1_IRQ_CORES=1
 
 Host values may be either last octets (for example 7 or 201) or full IPv4 addresses.
+If PIN_IRQS=1, the script will try to pin all IRQs whose labels mention END0_IFACE/END1_IFACE.
 EOF
 }
 
@@ -77,6 +94,18 @@ run_cmd() {
     fi
 
     "$@"
+}
+
+write_text_file() {
+    local path="$1"
+    local value="$2"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '[dry-run] write %s <= %s\n' "$path" "$value"
+        return 0
+    fi
+
+    printf '%s\n' "$value" > "$path"
 }
 
 need_root() {
@@ -171,11 +200,24 @@ Configuration:
   end1 source IP : $END1_SRC_IP
   end1 hosts     : $END1_HOSTS_RAW
   subnet prefix  : $IP_PREFIX
+    tcp rmem       : $TCP_RMEM
+    tcp wmem       : $TCP_WMEM
+    rmem_max       : $NET_CORE_RMEM_MAX
+    wmem_max       : $NET_CORE_WMEM_MAX
+    backlog        : $NETDEV_MAX_BACKLOG
+    pin irqs       : $PIN_IRQS
+    end0 irq cores : $END0_IRQ_CORES
+    end1 irq cores : $END1_IRQ_CORES
 EOF
 }
 
 apply_runtime_sysctl() {
     log "Applying runtime sysctl tuning"
+        run_cmd sysctl -w "net.core.rmem_max=${NET_CORE_RMEM_MAX}"
+        run_cmd sysctl -w "net.core.wmem_max=${NET_CORE_WMEM_MAX}"
+        run_cmd sysctl -w "net.core.netdev_max_backlog=${NETDEV_MAX_BACKLOG}"
+        run_cmd sysctl -w "net.ipv4.tcp_rmem=${TCP_RMEM}"
+        run_cmd sysctl -w "net.ipv4.tcp_wmem=${TCP_WMEM}"
     run_cmd sysctl -w net.ipv4.conf.all.rp_filter=2
     run_cmd sysctl -w net.ipv4.conf.default.rp_filter=2
     run_cmd sysctl -w "net.ipv4.conf.${END0_IFACE}.rp_filter=2"
@@ -191,6 +233,11 @@ write_persistent_sysctl() {
     if [[ "$DRY_RUN" -eq 1 ]]; then
         cat <<EOF
 [dry-run] would write $SYSCTL_PATH
+net.core.rmem_max=${NET_CORE_RMEM_MAX}
+net.core.wmem_max=${NET_CORE_WMEM_MAX}
+net.core.netdev_max_backlog=${NETDEV_MAX_BACKLOG}
+net.ipv4.tcp_rmem=${TCP_RMEM}
+net.ipv4.tcp_wmem=${TCP_WMEM}
 net.ipv4.conf.all.rp_filter=2
 net.ipv4.conf.default.rp_filter=2
 net.ipv4.conf.${END0_IFACE}.rp_filter=2
@@ -204,6 +251,11 @@ EOF
     fi
 
     cat > "$SYSCTL_PATH" <<EOF
+net.core.rmem_max=${NET_CORE_RMEM_MAX}
+net.core.wmem_max=${NET_CORE_WMEM_MAX}
+net.core.netdev_max_backlog=${NETDEV_MAX_BACKLOG}
+net.ipv4.tcp_rmem=${TCP_RMEM}
+net.ipv4.tcp_wmem=${TCP_WMEM}
 net.ipv4.conf.all.rp_filter=2
 net.ipv4.conf.default.rp_filter=2
 net.ipv4.conf.${END0_IFACE}.rp_filter=2
@@ -213,6 +265,45 @@ net.ipv4.conf.all.arp_announce=2
 net.ipv4.conf.${END0_IFACE}.arp_filter=1
 net.ipv4.conf.${END1_IFACE}.arp_filter=1
 EOF
+}
+
+find_interface_irqs() {
+    local iface="$1"
+    grep -F "$iface" /proc/interrupts | awk -F: '{gsub(/^[[:space:]]+/, "", $1); print $1}'
+}
+
+warn_if_irqbalance_active() {
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet irqbalance; then
+        warn "irqbalance is active and may override manual IRQ affinity; consider disabling or constraining irqbalance"
+    fi
+}
+
+pin_interface_irqs() {
+    local iface="$1"
+    local core_list="$2"
+    local irq
+    local found=0
+
+    while IFS= read -r irq; do
+        [[ -n "$irq" ]] || continue
+        found=1
+        log "Pinning IRQ $irq for $iface to CPU list $core_list"
+        write_text_file "/proc/irq/${irq}/smp_affinity_list" "$core_list"
+    done < <(find_interface_irqs "$iface")
+
+    if [[ "$found" -eq 0 ]]; then
+        warn "No IRQs found for interface $iface in /proc/interrupts"
+    fi
+}
+
+apply_irq_affinity() {
+    if [[ "$PIN_IRQS" != "1" ]]; then
+        return 0
+    fi
+
+    warn_if_irqbalance_active
+    pin_interface_irqs "$END0_IFACE" "$END0_IRQ_CORES"
+    pin_interface_irqs "$END1_IFACE" "$END1_IRQ_CORES"
 }
 
 apply_route_group() {
@@ -295,6 +386,14 @@ Environment=END1_SRC_IP=$END1_SRC_IP
 Environment="END0_HOSTS=$END0_HOSTS_RAW"
 Environment="END1_HOSTS=$END1_HOSTS_RAW"
 Environment=IP_PREFIX=$IP_PREFIX
+Environment=NET_CORE_RMEM_MAX=$NET_CORE_RMEM_MAX
+Environment=NET_CORE_WMEM_MAX=$NET_CORE_WMEM_MAX
+Environment="TCP_RMEM=$TCP_RMEM"
+Environment="TCP_WMEM=$TCP_WMEM"
+Environment=NETDEV_MAX_BACKLOG=$NETDEV_MAX_BACKLOG
+Environment=PIN_IRQS=$PIN_IRQS
+Environment=END0_IRQ_CORES=$END0_IRQ_CORES
+Environment=END1_IRQ_CORES=$END1_IRQ_CORES
 ExecStart=$INSTALL_PATH --apply
 RemainAfterExit=yes
 
@@ -334,6 +433,14 @@ Environment=END1_SRC_IP=$END1_SRC_IP
 Environment="END0_HOSTS=$END0_HOSTS_RAW"
 Environment="END1_HOSTS=$END1_HOSTS_RAW"
 Environment=IP_PREFIX=$IP_PREFIX
+Environment=NET_CORE_RMEM_MAX=$NET_CORE_RMEM_MAX
+Environment=NET_CORE_WMEM_MAX=$NET_CORE_WMEM_MAX
+Environment="TCP_RMEM=$TCP_RMEM"
+Environment="TCP_WMEM=$TCP_WMEM"
+Environment=NETDEV_MAX_BACKLOG=$NETDEV_MAX_BACKLOG
+Environment=PIN_IRQS=$PIN_IRQS
+Environment=END0_IRQ_CORES=$END0_IRQ_CORES
+Environment=END1_IRQ_CORES=$END1_IRQ_CORES
 ExecStart=$INSTALL_PATH --apply
 RemainAfterExit=yes
 
@@ -424,6 +531,7 @@ main() {
                 warn "Timed out waiting for $END1_SRC_IP on $END1_IFACE"
             fi
             apply_runtime_sysctl
+            apply_irq_affinity
             apply_route_group "$END0_IFACE" "$END0_SRC_IP" "${END0_HOSTS_ARRAY[@]}"
             apply_route_group "$END1_IFACE" "$END1_SRC_IP" "${END1_HOSTS_ARRAY[@]}"
             verify_routes
@@ -436,6 +544,7 @@ main() {
                 warn "Timed out waiting for $END1_SRC_IP on $END1_IFACE"
             fi
             apply_runtime_sysctl
+            apply_irq_affinity
             apply_route_group "$END0_IFACE" "$END0_SRC_IP" "${END0_HOSTS_ARRAY[@]}"
             apply_route_group "$END1_IFACE" "$END1_SRC_IP" "${END1_HOSTS_ARRAY[@]}"
             write_persistent_sysctl

@@ -53,6 +53,8 @@ type Service struct {
 	nodes        []string
 	shares       []string
 	baseMountDir string // Base directory for mounted shares (e.g., /ucmount)
+	rawNodes     map[string]struct{}
+	requireXML   bool
 
 	mu                    sync.RWMutex
 	isRunning             bool
@@ -114,10 +116,27 @@ func New(nodes, shares []string, baseMountDir string) *Service {
 	if baseMountDir == "" {
 		baseMountDir = "/ucmount"
 	}
+
+	rawNodes := make(map[string]struct{})
+	requireXML := false
+	for _, node := range nodes {
+		normalizedNode := normalizeNodeName(node)
+		if normalizedNode == "" {
+			continue
+		}
+		if normalizedNode == "CU" {
+			requireXML = true
+			continue
+		}
+		rawNodes[normalizedNode] = struct{}{}
+	}
+
 	return &Service{
 		nodes:          nodes,
 		shares:         shares,
 		baseMountDir:   baseMountDir,
+		rawNodes:       rawNodes,
+		requireXML:     requireXML,
 		activeTasks:    make(map[string]*taskInfo),
 		captureTracker: make(map[string]map[string]bool),
 	}
@@ -573,6 +592,10 @@ func (s *Service) copyFile(ctx context.Context, task *taskInfo, sourcePath, sour
 }
 
 func (s *Service) trackCaptureCompletion(filename, node string) {
+	if len(s.rawNodes) == 0 {
+		return
+	}
+
 	// Try to parse as RAW file first
 	info := parseCaptureFileName(filename)
 	if info == nil {
@@ -602,12 +625,19 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 	// Determine file type based on extension and content
 	fileExt := strings.ToLower(filepath.Ext(filename))
 	var fileKey string
+	normalizedNode := normalizeNodeName(node)
 
 	if fileExt == ".raw" {
 		// RAW files - track by node (13 files from WU01-WU13)
-		fileKey = fmt.Sprintf("raw:%s", node)
+		if _, ok := s.rawNodes[normalizedNode]; !ok {
+			return
+		}
+		fileKey = fmt.Sprintf("raw:%s", normalizedNode)
 	} else if fileExt == ".xml" {
 		// XML metadata file - single file from CU node (only for non-test captures)
+		if !s.requireXML {
+			return
+		}
 		fileKey = "xml:CU"
 	} else if fileExt == ".dat" {
 		// RawQv quality data file - optional supplemental file per capture
@@ -637,30 +667,30 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		}
 	}
 
-	// Complete capture requirements:
-	// - Normal capture: 13 RAW files + 1 XML file = 14 total
-	// - Test capture: 13 RAW files (XML may be missing)
-	const requiredRAWFiles = 13
+	requiredRAWFiles := len(s.rawNodes)
 
 	log.Debug().
 		Str("capture", info.CaptureNumber).
-		Str("node", node).
+		Str("node", normalizedNode).
 		Str("file_type", fileExt).
 		Bool("is_test", info.IsTest).
 		Int("raw_files", rawCount).
 		Bool("has_xml", hasXML).
 		Bool("has_dat", hasDAT).
+		Int("required_raw_files", requiredRAWFiles).
+		Bool("require_xml", s.requireXML).
 		Msgf("Capture progress: %s", formatCaptureSummary(rawCount, hasXML, hasDAT))
 
 	// Check if capture is complete
 	isComplete := false
 
 	if info.IsTest {
-		// Test captures: require only 13 RAW files (XML is optional/missing)
+		// Test captures require RAW files from the configured worker subset only.
 		isComplete = rawCount == requiredRAWFiles
 	} else {
-		// Normal captures: require 13 RAW + 1 XML
-		isComplete = rawCount == requiredRAWFiles && hasXML
+		// Normal captures require RAW files from the configured worker subset,
+		// plus XML only when this instance is responsible for CU.
+		isComplete = rawCount == requiredRAWFiles && (!s.requireXML || hasXML)
 	}
 
 	if isComplete {
@@ -764,6 +794,10 @@ func parseRawQvFileName(filename string) *models.CaptureInfo {
 		SessionID:     matches[3],
 		IsVerified:    true,
 	}
+}
+
+func normalizeNodeName(node string) string {
+	return strings.ToUpper(strings.TrimSpace(node))
 }
 
 func formatCaptureSummary(rawCount int, hasXML, hasDAT bool) string {

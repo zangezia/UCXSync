@@ -31,6 +31,7 @@ func runMount(cmd *cobra.Command, args []string) {
 		cfg.Credentials.Password,
 	)
 	netService.SetBaseMountDir(cfg.Network.MountRoot)
+	netService.SetMountOptions(cfg.Network.MountOptions)
 
 	// Mount all shares
 	if err := netService.MountAll(); err != nil {
@@ -61,6 +62,7 @@ func runUnmount(cmd *cobra.Command, args []string) {
 		cfg.Credentials.Password,
 	)
 	netService.SetBaseMountDir(cfg.Network.MountRoot)
+	netService.SetMountOptions(cfg.Network.MountOptions)
 
 	// Unmount all shares
 	if err := netService.UnmountAll(); err != nil {
