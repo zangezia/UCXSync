@@ -306,7 +306,6 @@ StandardError=journal
 
 # Security settings
 NoNewPrivileges=false
-PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 ReadWritePaths=$LOG_DIR $MOUNT_DIR /ucdata

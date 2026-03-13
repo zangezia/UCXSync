@@ -20,7 +20,7 @@ SyslogIdentifier=ucxsync
 
 # Security
 NoNewPrivileges=true
-PrivateTmp=true
+# Do not isolate mounts via PrivateTmp; services must observe live /ucdata mount changes.
 
 [Install]
 WantedBy=multi-user.target

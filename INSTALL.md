@@ -518,6 +518,15 @@ sudo journalctl -u ucxsync@b -n 100
 sudo systemctl status ucxsync-dualnic-routing.service
 ```
 
+If `/ucdata` was mounted after a service had already started on an older installation, one instance may report that `/ucdata` is unavailable while another works. In that case, update the unit files, reload systemd, and restart the affected instances:
+
+```bash
+sudo cp ucxsync.service /etc/systemd/system/
+sudo cp ucxsync@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart ucxsync ucxsync@a ucxsync@b
+```
+
 ### Cannot mount shares
 
 ```bash
