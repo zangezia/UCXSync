@@ -28,6 +28,8 @@ NETDEV_MAX_BACKLOG="${NETDEV_MAX_BACKLOG:-250000}"
 PIN_IRQS="${PIN_IRQS:-0}"
 END0_IRQ_CORES="${END0_IRQ_CORES:-0}"
 END1_IRQ_CORES="${END1_IRQ_CORES:-1}"
+END0_IRQS_RAW="${END0_IRQS:-}"
+END1_IRQS_RAW="${END1_IRQS:-}"
 
 DRY_RUN=0
 MODE="apply"
@@ -79,9 +81,12 @@ Environment overrides:
     PIN_IRQS=1
     END0_IRQ_CORES=0
     END1_IRQ_CORES=1
+    END0_IRQS="78"
+    END1_IRQS="79"
 
 Host values may be either last octets (for example 7 or 201) or full IPv4 addresses.
 If PIN_IRQS=1, the script will try to pin all IRQs whose labels mention END0_IFACE/END1_IFACE.
+Set END0_IRQS / END1_IRQS to explicit IRQ numbers if you want deterministic pinning.
 EOF
 }
 
@@ -150,6 +155,12 @@ split_hosts() {
     printf '%s\n' "${HOSTS[@]}"
 }
 
+split_words() {
+    local raw="$1"
+    read -r -a WORDS <<< "$raw"
+    printf '%s\n' "${WORDS[@]}"
+}
+
 normalize_ip() {
     local value="$1"
     if [[ "$value" == *.* ]]; then
@@ -208,6 +219,8 @@ Configuration:
     pin irqs       : $PIN_IRQS
     end0 irq cores : $END0_IRQ_CORES
     end1 irq cores : $END1_IRQ_CORES
+    end0 irqs      : ${END0_IRQS_RAW:-auto}
+    end1 irqs      : ${END1_IRQS_RAW:-auto}
 EOF
 }
 
@@ -272,6 +285,18 @@ find_interface_irqs() {
     grep -F "$iface" /proc/interrupts | awk -F: '{gsub(/^[[:space:]]+/, "", $1); print $1}'
 }
 
+resolve_irqs() {
+    local explicit_raw="$1"
+    local iface="$2"
+
+    if [[ -n "$explicit_raw" ]]; then
+        split_words "$explicit_raw"
+        return 0
+    fi
+
+    find_interface_irqs "$iface"
+}
+
 warn_if_irqbalance_active() {
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet irqbalance; then
         warn "irqbalance is active and may override manual IRQ affinity; consider disabling or constraining irqbalance"
@@ -281,18 +306,23 @@ warn_if_irqbalance_active() {
 pin_interface_irqs() {
     local iface="$1"
     local core_list="$2"
+    local explicit_irqs_raw="$3"
     local irq
     local found=0
+    local irq_count=0
 
     while IFS= read -r irq; do
         [[ -n "$irq" ]] || continue
         found=1
+        irq_count=$((irq_count + 1))
         log "Pinning IRQ $irq for $iface to CPU list $core_list"
         write_text_file "/proc/irq/${irq}/smp_affinity_list" "$core_list"
-    done < <(find_interface_irqs "$iface")
+    done < <(resolve_irqs "$explicit_irqs_raw" "$iface")
 
     if [[ "$found" -eq 0 ]]; then
         warn "No IRQs found for interface $iface in /proc/interrupts"
+    elif [[ -z "$explicit_irqs_raw" && "$irq_count" -gt 1 ]]; then
+        warn "Auto-detected $irq_count IRQs for $iface; pinning all of them to the same CPU list can reduce throughput on multiqueue NICs. Consider explicit END0_IRQS/END1_IRQS values."
     fi
 }
 
@@ -302,8 +332,8 @@ apply_irq_affinity() {
     fi
 
     warn_if_irqbalance_active
-    pin_interface_irqs "$END0_IFACE" "$END0_IRQ_CORES"
-    pin_interface_irqs "$END1_IFACE" "$END1_IRQ_CORES"
+    pin_interface_irqs "$END0_IFACE" "$END0_IRQ_CORES" "$END0_IRQS_RAW"
+    pin_interface_irqs "$END1_IFACE" "$END1_IRQ_CORES" "$END1_IRQS_RAW"
 }
 
 apply_route_group() {
@@ -394,6 +424,8 @@ Environment=NETDEV_MAX_BACKLOG=$NETDEV_MAX_BACKLOG
 Environment=PIN_IRQS=$PIN_IRQS
 Environment=END0_IRQ_CORES=$END0_IRQ_CORES
 Environment=END1_IRQ_CORES=$END1_IRQ_CORES
+Environment="END0_IRQS=$END0_IRQS_RAW"
+Environment="END1_IRQS=$END1_IRQS_RAW"
 ExecStart=$INSTALL_PATH --apply
 RemainAfterExit=yes
 
@@ -441,6 +473,8 @@ Environment=NETDEV_MAX_BACKLOG=$NETDEV_MAX_BACKLOG
 Environment=PIN_IRQS=$PIN_IRQS
 Environment=END0_IRQ_CORES=$END0_IRQ_CORES
 Environment=END1_IRQ_CORES=$END1_IRQ_CORES
+Environment="END0_IRQS=$END0_IRQS_RAW"
+Environment="END1_IRQS=$END1_IRQS_RAW"
 ExecStart=$INSTALL_PATH --apply
 RemainAfterExit=yes
 

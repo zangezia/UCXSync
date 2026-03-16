@@ -15,6 +15,7 @@ type Config struct {
 	Nodes       []string    `mapstructure:"nodes"`
 	Shares      []string    `mapstructure:"shares"`
 	Credentials Credentials `mapstructure:"credentials"`
+	Database    Database    `mapstructure:"database"`
 	Network     Network     `mapstructure:"network"`
 	Sync        Sync        `mapstructure:"sync"`
 	Web         Web         `mapstructure:"web"`
@@ -26,6 +27,11 @@ type Config struct {
 type Credentials struct {
 	Username string `mapstructure:"username"`
 	Password string `mapstructure:"password"`
+}
+
+// Database holds SQLite persistence settings.
+type Database struct {
+	Path string `mapstructure:"path"`
 }
 
 // Network holds CIFS mount settings
@@ -138,6 +144,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("credentials.username", "Administrator")
 	v.SetDefault("credentials.password", "ultracam")
 
+	// Database defaults
+	v.SetDefault("database.path", "/var/lib/ucxsync/state.db")
+
 	// Network defaults
 	v.SetDefault("network.mount_root", "/ucmount")
 	v.SetDefault("network.mount_options", []string{})
@@ -189,6 +198,11 @@ func (c *Config) Validate() error {
 
 	if c.Network.MountRoot == "/" {
 		return fmt.Errorf("network.mount_root must not be /")
+	}
+
+	c.Database.Path = strings.TrimSpace(c.Database.Path)
+	if c.Database.Path == "" {
+		return fmt.Errorf("database.path must not be empty")
 	}
 
 	cleanMountOptions := make([]string, 0, len(c.Network.MountOptions))

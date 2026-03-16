@@ -45,16 +45,17 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/zangezia/UCXSync/internal/state"
 	"github.com/zangezia/UCXSync/pkg/models"
 )
 
 // Service handles file synchronization operations
 type Service struct {
-	nodes        []string
-	shares       []string
-	baseMountDir string // Base directory for mounted shares (e.g., /ucmount)
-	rawNodes     map[string]struct{}
-	requireXML   bool
+	nodes           []string
+	shares          []string
+	baseMountDir    string // Base directory for mounted shares (e.g., /ucmount)
+	requiredSensors map[string]struct{}
+	stateStore      *state.Store
 
 	mu                    sync.RWMutex
 	isRunning             bool
@@ -86,6 +87,14 @@ type taskInfo struct {
 }
 
 var (
+	requiredSensorCodes = []string{
+		"00-00", "00-01", "00-02", "00-03",
+		"01-00", "01-01",
+		"02-00", "02-01",
+		"03-00",
+		"04-00", "05-00", "06-00", "07-00",
+	}
+
 	// RAW capture file name format (from WU01-WU13 nodes):
 	// Lvl0X or Lvl00 - file type (0X=unverified, 00=verified)
 	// 00001 - capture number
@@ -117,29 +126,59 @@ func New(nodes, shares []string, baseMountDir string) *Service {
 		baseMountDir = "/ucmount"
 	}
 
-	rawNodes := make(map[string]struct{})
-	requireXML := false
-	for _, node := range nodes {
-		normalizedNode := normalizeNodeName(node)
-		if normalizedNode == "" {
-			continue
-		}
-		if normalizedNode == "CU" {
-			requireXML = true
-			continue
-		}
-		rawNodes[normalizedNode] = struct{}{}
+	requiredSensors := make(map[string]struct{}, len(requiredSensorCodes))
+	for _, sensorCode := range requiredSensorCodes {
+		requiredSensors[sensorCode] = struct{}{}
 	}
 
 	return &Service{
-		nodes:          nodes,
-		shares:         shares,
-		baseMountDir:   baseMountDir,
-		rawNodes:       rawNodes,
-		requireXML:     requireXML,
-		activeTasks:    make(map[string]*taskInfo),
-		captureTracker: make(map[string]map[string]bool),
+		nodes:           nodes,
+		shares:          shares,
+		baseMountDir:    baseMountDir,
+		requiredSensors: requiredSensors,
+		activeTasks:     make(map[string]*taskInfo),
+		captureTracker:  make(map[string]map[string]bool),
 	}
+}
+
+// SetStateStore enables persistent SQLite-backed state for the service.
+func (s *Service) SetStateStore(store *state.Store) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.stateStore = store
+	if store == nil {
+		return nil
+	}
+
+	status, err := store.LoadStatus()
+	if err != nil {
+		return err
+	}
+
+	s.project = status.Project
+	s.destination = status.Destination
+	s.maxParallelism = status.MaxParallelism
+	s.isRunning = false
+	atomic.StoreInt32(&s.completedCaptures, int32(status.CompletedCaptures))
+	atomic.StoreInt32(&s.completedTestCaptures, int32(status.CompletedTestCaptures))
+	s.lastCaptureNumber = status.LastCaptureNumber
+	s.lastTestCaptureNumber = status.LastTestCaptureNumber
+	s.captureTracker = make(map[string]map[string]bool)
+
+	if status.IsRunning {
+		return store.StopRun(state.StatusSnapshot{
+			Project:               status.Project,
+			Destination:           status.Destination,
+			MaxParallelism:        status.MaxParallelism,
+			CompletedCaptures:     status.CompletedCaptures,
+			CompletedTestCaptures: status.CompletedTestCaptures,
+			LastCaptureNumber:     status.LastCaptureNumber,
+			LastTestCaptureNumber: status.LastTestCaptureNumber,
+		})
+	}
+
+	return nil
 }
 
 // Start begins synchronization
@@ -156,6 +195,11 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 	s.maxParallelism = maxParallelism
 	s.globalSemaphore = make(chan struct{}, maxParallelism) // Global limit across all tasks
 	s.isRunning = true
+	s.captureTracker = make(map[string]map[string]bool)
+	atomic.StoreInt32(&s.completedCaptures, 0)
+	atomic.StoreInt32(&s.completedTestCaptures, 0)
+	s.lastCaptureNumber = ""
+	s.lastTestCaptureNumber = ""
 
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
@@ -178,6 +222,19 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 		Str("destination", destDir).
 		Int("parallelism", maxParallelism).
 		Msg("Starting synchronization")
+
+	if s.stateStore != nil {
+		persisted, err := s.stateStore.StartRun(project, destination, maxParallelism)
+		if err != nil {
+			s.isRunning = false
+			s.cancel = nil
+			return fmt.Errorf("failed to initialize persistent state: %w", err)
+		}
+		atomic.StoreInt32(&s.completedCaptures, int32(persisted.CompletedCaptures))
+		atomic.StoreInt32(&s.completedTestCaptures, int32(persisted.CompletedTestCaptures))
+		s.lastCaptureNumber = persisted.LastCaptureNumber
+		s.lastTestCaptureNumber = persisted.LastTestCaptureNumber
+	}
 
 	// Start main sync loop
 	s.wg.Add(1)
@@ -206,11 +263,27 @@ func (s *Service) Stop() {
 	s.wg.Wait()
 
 	s.mu.Lock()
+	statusSnapshot := state.StatusSnapshot{
+		Project:               s.project,
+		Destination:           s.destination,
+		MaxParallelism:        s.maxParallelism,
+		CompletedCaptures:     int(atomic.LoadInt32(&s.completedCaptures)),
+		CompletedTestCaptures: int(atomic.LoadInt32(&s.completedTestCaptures)),
+		LastCaptureNumber:     s.lastCaptureNumber,
+		LastTestCaptureNumber: s.lastTestCaptureNumber,
+	}
 	s.isRunning = false
 	s.cancel = nil
 	s.activeTasks = make(map[string]*taskInfo)
 	s.globalSemaphore = nil // Release semaphore
+	store := s.stateStore
 	s.mu.Unlock()
+
+	if store != nil {
+		if err := store.StopRun(statusSnapshot); err != nil {
+			log.Error().Err(err).Msg("Failed to persist stopped synchronization state")
+		}
+	}
 
 	log.Info().Msg("Synchronization stopped")
 }
@@ -218,8 +291,6 @@ func (s *Service) Stop() {
 // GetStatus returns current sync status
 func (s *Service) GetStatus() models.SyncStatus {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	tasks := make([]models.SyncTask, 0, len(s.activeTasks))
 	for _, task := range s.activeTasks {
 		progress := 0.0
@@ -247,7 +318,7 @@ func (s *Service) GetStatus() models.SyncStatus {
 		activeOps = len(s.globalSemaphore)
 	}
 
-	return models.SyncStatus{
+	status := models.SyncStatus{
 		IsRunning:             s.isRunning,
 		Project:               s.project,
 		Destination:           s.destination,
@@ -259,6 +330,24 @@ func (s *Service) GetStatus() models.SyncStatus {
 		LastTestCaptureNumber: s.lastTestCaptureNumber,
 		ActiveTasks:           tasks,
 	}
+	store := s.stateStore
+	s.mu.RUnlock()
+
+	if store != nil {
+		persisted, err := store.LoadStatus()
+		if err == nil {
+			status.IsRunning = persisted.IsRunning
+			status.Project = persisted.Project
+			status.Destination = persisted.Destination
+			status.MaxParallelism = persisted.MaxParallelism
+			status.CompletedCaptures = persisted.CompletedCaptures
+			status.CompletedTestCaptures = persisted.CompletedTestCaptures
+			status.LastCaptureNumber = persisted.LastCaptureNumber
+			status.LastTestCaptureNumber = persisted.LastTestCaptureNumber
+		}
+	}
+
+	return status
 }
 
 // FindProjects scans network for available projects
@@ -317,6 +406,19 @@ func (s *Service) FindProjects(ctx context.Context) ([]models.ProjectInfo, error
 			Name:   name,
 			Source: source,
 		})
+	}
+
+	if len(projects) == 0 && s.stateStore != nil {
+		cachedProjects, err := s.stateStore.LoadProjects()
+		if err == nil && len(cachedProjects) > 0 {
+			return cachedProjects, nil
+		}
+	}
+
+	if s.stateStore != nil && len(projects) > 0 {
+		if err := s.stateStore.SaveProjects(projects); err != nil {
+			log.Error().Err(err).Msg("Failed to persist discovered projects")
+		}
 	}
 
 	return projects, nil
@@ -592,7 +694,7 @@ func (s *Service) copyFile(ctx context.Context, task *taskInfo, sourcePath, sour
 }
 
 func (s *Service) trackCaptureCompletion(filename, node string) {
-	if len(s.rawNodes) == 0 {
+	if len(s.requiredSensors) == 0 {
 		return
 	}
 
@@ -613,6 +715,78 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		return
 	}
 
+	s.mu.RLock()
+	project := s.project
+	store := s.stateStore
+	s.mu.RUnlock()
+
+	if store != nil {
+		fileExt := strings.ToLower(filepath.Ext(filename))
+		var fileKey string
+
+		switch fileExt {
+		case ".raw":
+			sensorCode := strings.TrimSpace(info.SensorCode)
+			if _, ok := s.requiredSensors[sensorCode]; !ok {
+				return
+			}
+			fileKey = fmt.Sprintf("raw:%s", sensorCode)
+		case ".xml":
+			fileKey = "xml:CU"
+		case ".dat":
+			fileKey = "dat:CU"
+		default:
+			return
+		}
+
+		status, completed, err := store.RecordCapture(state.CaptureObservation{
+			Project:          project,
+			Info:             *info,
+			FileKey:          fileKey,
+			RequiredRawFiles: len(s.requiredSensors),
+			RequireXML:       true,
+			RequireDAT:       true,
+		})
+		if err != nil {
+			log.Error().Err(err).Str("capture", info.CaptureNumber).Msg("Failed to persist capture state")
+			return
+		}
+
+		atomic.StoreInt32(&s.completedCaptures, int32(status.CompletedCaptures))
+		atomic.StoreInt32(&s.completedTestCaptures, int32(status.CompletedTestCaptures))
+		s.mu.Lock()
+		s.lastCaptureNumber = status.LastCaptureNumber
+		s.lastTestCaptureNumber = status.LastTestCaptureNumber
+		s.mu.Unlock()
+
+		if completed {
+			summary := formatCaptureSummary(status.RawCount, status.HasXML, status.HasDAT)
+			if info.IsTest {
+				log.Info().
+					Str("capture", info.CaptureNumber).
+					Str("project", info.ProjectName).
+					Str("type", info.DataType).
+					Bool("verified", info.IsVerified).
+					Str("sensor", info.SensorCode).
+					Str("session", info.SessionID).
+					Int("test_count", status.CompletedTestCaptures).
+					Msgf("✓ TEST capture completed (%s)", summary)
+			} else {
+				log.Info().
+					Str("capture", info.CaptureNumber).
+					Str("project", info.ProjectName).
+					Str("type", info.DataType).
+					Bool("verified", info.IsVerified).
+					Str("sensor", info.SensorCode).
+					Str("session", info.SessionID).
+					Int("total_count", status.CompletedCaptures).
+					Msgf("✓ Capture completed (%s)", summary)
+			}
+		}
+
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -625,19 +799,14 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 	// Determine file type based on extension and content
 	fileExt := strings.ToLower(filepath.Ext(filename))
 	var fileKey string
-	normalizedNode := normalizeNodeName(node)
 
 	if fileExt == ".raw" {
-		// RAW files - track by node (13 files from WU01-WU13)
-		if _, ok := s.rawNodes[normalizedNode]; !ok {
+		sensorCode := strings.TrimSpace(info.SensorCode)
+		if _, ok := s.requiredSensors[sensorCode]; !ok {
 			return
 		}
-		fileKey = fmt.Sprintf("raw:%s", normalizedNode)
+		fileKey = fmt.Sprintf("raw:%s", sensorCode)
 	} else if fileExt == ".xml" {
-		// XML metadata file - single file from CU node (only for non-test captures)
-		if !s.requireXML {
-			return
-		}
 		fileKey = "xml:CU"
 	} else if fileExt == ".dat" {
 		// RawQv quality data file - optional supplemental file per capture
@@ -667,31 +836,23 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		}
 	}
 
-	requiredRAWFiles := len(s.rawNodes)
+	requiredRAWFiles := len(s.requiredSensors)
 
 	log.Debug().
 		Str("capture", info.CaptureNumber).
-		Str("node", normalizedNode).
+		Str("node", normalizeNodeName(node)).
 		Str("file_type", fileExt).
 		Bool("is_test", info.IsTest).
 		Int("raw_files", rawCount).
 		Bool("has_xml", hasXML).
 		Bool("has_dat", hasDAT).
 		Int("required_raw_files", requiredRAWFiles).
-		Bool("require_xml", s.requireXML).
+		Bool("require_xml", true).
+		Bool("require_rawqv", true).
 		Msgf("Capture progress: %s", formatCaptureSummary(rawCount, hasXML, hasDAT))
 
 	// Check if capture is complete
-	isComplete := false
-
-	if info.IsTest {
-		// Test captures require RAW files from the configured worker subset only.
-		isComplete = rawCount == requiredRAWFiles
-	} else {
-		// Normal captures require RAW files from the configured worker subset,
-		// plus XML only when this instance is responsible for CU.
-		isComplete = rawCount == requiredRAWFiles && (!s.requireXML || hasXML)
-	}
+	isComplete := rawCount == requiredRAWFiles && hasXML && hasDAT
 
 	if isComplete {
 		summary := formatCaptureSummary(rawCount, hasXML, hasDAT)

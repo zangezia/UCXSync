@@ -3,9 +3,12 @@ package sync
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zangezia/UCXSync/internal/state"
 )
 
 // TestGlobalSemaphore verifies that globalSemaphore limits concurrent operations
@@ -122,54 +125,97 @@ func TestTrackCaptureCompletionWithRawQv(t *testing.T) {
 	nodes := []string{"WU01", "WU02", "WU03", "WU04", "WU05", "WU06", "WU07", "WU08", "WU09", "WU10", "WU11", "WU12", "WU13", "CU"}
 	svc := New(nodes, []string{"E$"}, "/ucmount")
 
-	for i, node := range nodes {
-		filename := fmt.Sprintf("Lvl0X-00002-GT3-%02d-00-B531D783_3779_4327_9CBD_9B2107EF1969.raw", i)
+	for i, sensorCode := range requiredSensorCodes {
+		node := nodes[i%len(nodes)]
+		filename := fmt.Sprintf("Lvl0X-00002-GT3-%s-B531D783_3779_4327_9CBD_9B2107EF1969.raw", sensorCode)
 		svc.trackCaptureCompletion(filename, node)
 	}
 
-	svc.trackCaptureCompletion("RawQv-00002-GT3-B531D783_3779_4327_9CBD_9B2107EF1969.dat", "CU")
 	svc.trackCaptureCompletion("EAD-00002-GT3-B531D783_3779_4327_9CBD_9B2107EF1969.xml", "CU")
+	svc.trackCaptureCompletion("RawQv-00002-GT3-B531D783_3779_4327_9CBD_9B2107EF1969.dat", "CU")
 
 	if got := atomic.LoadInt32(&svc.completedCaptures); got != 1 {
 		t.Fatalf("completedCaptures = %d, want 1", got)
 	}
 }
 
-func TestTrackCaptureCompletionCountsSplitInstanceWithoutCU(t *testing.T) {
+func TestTrackCaptureCompletionRequiresAllSensorsAndAuxiliaryFiles(t *testing.T) {
 	t.Parallel()
 
-	nodes := []string{"WU01", "WU02", "WU03", "WU04", "WU05", "WU06", "WU07"}
-	svc := New(nodes, []string{"E$"}, "/ucmount-a")
+	svc := New([]string{"WU01", "WU02", "WU03"}, []string{"E$"}, "/ucmount-a")
 
-	for i, node := range nodes {
-		filename := fmt.Sprintf("Lvl00-00003-Project-%02d-00-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", i)
-		svc.trackCaptureCompletion(filename, node)
-	}
-
-	if got := atomic.LoadInt32(&svc.completedCaptures); got != 1 {
-		t.Fatalf("completedCaptures = %d, want 1", got)
-	}
-}
-
-func TestTrackCaptureCompletionCountsSplitInstanceWithCUXML(t *testing.T) {
-	t.Parallel()
-
-	nodes := []string{"WU08", "WU09", "WU10", "WU11", "WU12", "WU13", "CU"}
-	svc := New(nodes, []string{"E$"}, "/ucmount-b")
-
-	for i, node := range nodes[:6] {
-		filename := fmt.Sprintf("Lvl00-00004-Project-%02d-00-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", i)
-		svc.trackCaptureCompletion(filename, node)
+	for _, sensorCode := range requiredSensorCodes {
+		filename := fmt.Sprintf("Lvl00-00003-Project-%s-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", sensorCode)
+		svc.trackCaptureCompletion(filename, "WU01")
 	}
 
 	if got := atomic.LoadInt32(&svc.completedCaptures); got != 0 {
-		t.Fatalf("completedCaptures before XML = %d, want 0", got)
+		t.Fatalf("completedCaptures without XML/RawQv = %d, want 0", got)
 	}
 
-	svc.trackCaptureCompletion("EAD-00004-Project-ABCDEF01_2345_6789_ABCD_EF0123456789.xml", "CU")
+	svc.trackCaptureCompletion("EAD-00003-Project-ABCDEF01_2345_6789_ABCD_EF0123456789.xml", "CU")
+	if got := atomic.LoadInt32(&svc.completedCaptures); got != 0 {
+		t.Fatalf("completedCaptures without RawQv = %d, want 0", got)
+	}
 
+	svc.trackCaptureCompletion("RawQv-00003-Project-ABCDEF01_2345_6789_ABCD_EF0123456789.dat", "CU")
 	if got := atomic.LoadInt32(&svc.completedCaptures); got != 1 {
-		t.Fatalf("completedCaptures after XML = %d, want 1", got)
+		t.Fatalf("completedCaptures after XML and RawQv = %d, want 1", got)
+	}
+}
+
+func TestTrackCaptureCompletionAggregatesAcrossSplitInstancesWithSharedState(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "shared-state.db")
+	storeA, err := state.New(path, "ucxsync@a")
+	if err != nil {
+		t.Fatalf("failed to create storeA: %v", err)
+	}
+	defer storeA.Close()
+	storeB, err := state.New(path, "ucxsync@b")
+	if err != nil {
+		t.Fatalf("failed to create storeB: %v", err)
+	}
+	defer storeB.Close()
+
+	svcA := New([]string{"WU01", "WU02", "WU03", "WU04", "WU05", "WU06", "WU07"}, []string{"E$"}, "/ucmount-a")
+	if err := svcA.SetStateStore(storeA); err != nil {
+		t.Fatalf("svcA.SetStateStore returned error: %v", err)
+	}
+	svcB := New([]string{"WU08", "WU09", "WU10", "WU11", "WU12", "WU13", "CU"}, []string{"E$"}, "/ucmount-b")
+	if err := svcB.SetStateStore(storeB); err != nil {
+		t.Fatalf("svcB.SetStateStore returned error: %v", err)
+	}
+
+	if _, err := storeA.StartRun("Project", "/tmp", 4); err != nil {
+		t.Fatalf("storeA.StartRun returned error: %v", err)
+	}
+	if _, err := storeB.StartRun("Project", "/tmp", 4); err != nil {
+		t.Fatalf("storeB.StartRun returned error: %v", err)
+	}
+
+	svcA.mu.Lock()
+	svcA.project = "Project"
+	svcA.mu.Unlock()
+	svcB.mu.Lock()
+	svcB.project = "Project"
+	svcB.mu.Unlock()
+
+	for _, sensorCode := range requiredSensorCodes[:7] {
+		svcA.trackCaptureCompletion(fmt.Sprintf("Lvl00-00004-Project-%s-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", sensorCode), "WU01")
+	}
+	for _, sensorCode := range requiredSensorCodes[7:] {
+		svcB.trackCaptureCompletion(fmt.Sprintf("Lvl00-00004-Project-%s-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", sensorCode), "WU08")
+	}
+	svcB.trackCaptureCompletion("EAD-00004-Project-ABCDEF01_2345_6789_ABCD_EF0123456789.xml", "CU")
+	svcB.trackCaptureCompletion("RawQv-00004-Project-ABCDEF01_2345_6789_ABCD_EF0123456789.dat", "CU")
+
+	if got := svcA.GetStatus().CompletedCaptures; got != 1 {
+		t.Fatalf("svcA completed captures = %d, want 1", got)
+	}
+	if got := svcB.GetStatus().CompletedCaptures; got != 1 {
+		t.Fatalf("svcB completed captures = %d, want 1", got)
 	}
 }
 

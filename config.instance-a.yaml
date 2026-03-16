@@ -18,6 +18,9 @@ credentials:
   username: Administrator
   password: ultracam
 
+database:
+  path: "/var/lib/ucxsync/state.db"
+
 network:
   mount_root: "/ucmount-a"
   mount_options: []

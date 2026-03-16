@@ -126,7 +126,10 @@ func runApp(cmd *cobra.Command, args []string) {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Start web server
-	server := web.NewServer(cfg)
+	server, err := web.NewServer(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize web server")
+	}
 
 	log.Info().
 		Str("address", fmt.Sprintf("http://%s:%d", cfg.Web.Host, cfg.Web.Port)).

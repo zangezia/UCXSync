@@ -24,6 +24,30 @@ func TestLoadAppliesDefaultNetworkMountRoot(t *testing.T) {
 	if cfg.Network.MountRoot != "/ucmount" {
 		t.Fatalf("expected default mount root /ucmount, got %q", cfg.Network.MountRoot)
 	}
+
+	if cfg.Database.Path != "/var/lib/ucxsync/state.db" {
+		t.Fatalf("expected default database path /var/lib/ucxsync/state.db, got %q", cfg.Database.Path)
+	}
+}
+
+func TestLoadRejectsEmptyDatabasePath(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.yaml")
+	configBody := "database:\n  path: '   '\n"
+	if err := os.WriteFile(configPath, []byte(configBody), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("expected Load to fail for empty database path")
+	}
+
+	if !strings.Contains(err.Error(), "database.path") {
+		t.Fatalf("expected database.path validation error, got %v", err)
+	}
 }
 
 func TestLoadSupportsCustomNetworkMountRoot(t *testing.T) {

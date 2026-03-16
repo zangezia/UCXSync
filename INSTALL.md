@@ -230,6 +230,8 @@ Both instances may write to the same destination, for example `/ucdata`, but the
 - `web.port`
 - `logging.file`
 
+At the same time, both instances should use the **same** `database.path`, because snapshot completion is now determined from the full set of files for one capture: all 13 RAW sensor files (`00-00` … `07-00`) plus `EAD` and `RawQv`.
+
 ### Principle of operation
 
 ```text
@@ -327,6 +329,7 @@ Check that:
 
 - `a.yaml` uses `/ucmount-a` and port `8080`
 - `b.yaml` uses `/ucmount-b` and port `8081`
+- both configs use the same `database.path`, for example `/var/lib/ucxsync/state.db`
 - optional `network.mount_options` are consistent between instances if you tune CIFS
 - `a.yaml` contains `web.dashboard.instances` for both `http://127.0.0.1:8080` and `http://127.0.0.1:8081`
 - node lists do not overlap

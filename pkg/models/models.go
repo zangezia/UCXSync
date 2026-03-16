@@ -41,6 +41,17 @@ type SyncStatus struct {
 	ActiveTasks           []SyncTask `json:"active_tasks"`
 }
 
+// PersistedCaptureStatus holds per-project persisted capture counters and progress.
+type PersistedCaptureStatus struct {
+	CompletedCaptures     int    `json:"completed_captures"`
+	CompletedTestCaptures int    `json:"completed_test_captures"`
+	LastCaptureNumber     string `json:"last_capture_number"`
+	LastTestCaptureNumber string `json:"last_test_capture_number"`
+	RawCount              int    `json:"raw_count"`
+	HasXML                bool   `json:"has_xml"`
+	HasDAT                bool   `json:"has_dat"`
+}
+
 // NetworkInterfaceMetrics holds throughput data for a specific network interface.
 type NetworkInterfaceMetrics struct {
 	Name        string  `json:"name"`

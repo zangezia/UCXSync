@@ -27,6 +27,9 @@ credentials:
   username: Administrator
   password: ultracam
 
+database:
+  path: "/var/lib/ucxsync/state.db"  # SQLite state for projects, captures, and status
+
 # Network share mounting
 network:
   mount_root: "/ucmount"           # Change per instance, e.g. /ucmount-a and /ucmount-b

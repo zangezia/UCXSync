@@ -20,6 +20,7 @@ import (
 	"github.com/zangezia/UCXSync/internal/config"
 	"github.com/zangezia/UCXSync/internal/monitor"
 	"github.com/zangezia/UCXSync/internal/network"
+	"github.com/zangezia/UCXSync/internal/state"
 	syncService "github.com/zangezia/UCXSync/internal/sync"
 	"github.com/zangezia/UCXSync/pkg/models"
 )
@@ -41,6 +42,7 @@ type Server struct {
 	monService  *monitor.Service
 	netService  *network.Service
 	serviceName string
+	stateStore  *state.Store
 	webRoot     string
 	httpClient  *http.Client
 
@@ -82,12 +84,21 @@ func getWebRoot() string {
 }
 
 // NewServer creates a new web server
-func NewServer(cfg *config.Config) *Server {
+func NewServer(cfg *config.Config) (*Server, error) {
+	store, err := state.New(cfg.Database.Path, getServiceName())
+	if err != nil {
+		return nil, err
+	}
+
 	svc := syncService.New(
 		cfg.Nodes,
 		cfg.Shares,
 		cfg.Network.MountRoot,
 	)
+	if err := svc.SetStateStore(store); err != nil {
+		store.Close()
+		return nil, err
+	}
 
 	monService := monitor.New(
 		cfg.Monitoring.PerformanceUpdateInterval,
@@ -111,12 +122,13 @@ func NewServer(cfg *config.Config) *Server {
 		monService:  monService,
 		netService:  netService,
 		serviceName: getServiceName(),
+		stateStore:  store,
 		webRoot:     getWebRoot(),
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
 		clients: make(map[*websocket.Conn]bool),
-	}
+	}, nil
 }
 
 // Start starts the web server
@@ -183,6 +195,13 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Graceful shutdown
 	log.Info().Msg("Shutting down web server...")
+	defer func() {
+		if s.stateStore != nil {
+			if err := s.stateStore.Close(); err != nil {
+				log.Error().Err(err).Msg("Failed to close SQLite state store")
+			}
+		}
+	}()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
