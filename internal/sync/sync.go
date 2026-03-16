@@ -56,6 +56,7 @@ type Service struct {
 	baseMountDir    string // Base directory for mounted shares (e.g., /ucmount)
 	requiredSensors map[string]struct{}
 	stateStore      *state.Store
+	forceFullResync bool
 
 	mu                    sync.RWMutex
 	isRunning             bool
@@ -182,7 +183,7 @@ func (s *Service) SetStateStore(store *state.Store) error {
 }
 
 // Start begins synchronization
-func (s *Service) Start(ctx context.Context, project, destination string, maxParallelism int) error {
+func (s *Service) Start(ctx context.Context, project, destination string, maxParallelism int, forceFullResync bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -193,6 +194,7 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 	s.project = project
 	s.destination = destination
 	s.maxParallelism = maxParallelism
+	s.forceFullResync = forceFullResync
 	s.globalSemaphore = make(chan struct{}, maxParallelism) // Global limit across all tasks
 	s.isRunning = true
 	s.captureTracker = make(map[string]map[string]bool)
@@ -224,6 +226,14 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 		Msg("Starting synchronization")
 
 	if s.stateStore != nil {
+		if forceFullResync {
+			if err := s.stateStore.ResetCopiedFiles(project); err != nil {
+				s.isRunning = false
+				s.cancel = nil
+				return fmt.Errorf("failed to reset copied file state: %w", err)
+			}
+		}
+
 		persisted, err := s.stateStore.StartRun(project, destination, maxParallelism)
 		if err != nil {
 			s.isRunning = false
@@ -275,6 +285,7 @@ func (s *Service) Stop() {
 	s.isRunning = false
 	s.cancel = nil
 	s.activeTasks = make(map[string]*taskInfo)
+	s.forceFullResync = false
 	s.globalSemaphore = nil // Release semaphore
 	store := s.stateStore
 	s.mu.Unlock()
@@ -612,17 +623,34 @@ func (s *Service) shouldCopyFile(sourcePath, sourceRoot, destRoot string) bool {
 	if err != nil {
 		return true
 	}
+	relPath = filepath.ToSlash(relPath)
+
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return true
+	}
+
+	s.mu.RLock()
+	store := s.stateStore
+	project := s.project
+	forceFullResync := s.forceFullResync
+	s.mu.RUnlock()
+
+	if store != nil && !forceFullResync {
+		copied, err := store.IsFileCopied(project, relPath, sourceInfo.Size(), sourceInfo.ModTime())
+		if err == nil && copied {
+			return false
+		}
+		if err != nil {
+			log.Warn().Err(err).Str("file", relPath).Msg("Failed to check persisted copied file state")
+		}
+	}
 
 	destPath := filepath.Join(destRoot, relPath)
 	destInfo, err := os.Stat(destPath)
 	if os.IsNotExist(err) {
 		return true
 	}
-	if err != nil {
-		return true
-	}
-
-	sourceInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return true
 	}
@@ -686,6 +714,18 @@ func (s *Service) copyFile(ctx context.Context, task *taskInfo, sourcePath, sour
 	atomic.AddInt32(&task.copiedFiles, 1)
 	atomic.AddInt64(&task.copiedBytes, written)
 	task.lastActivity = time.Now()
+
+	s.mu.RLock()
+	project := s.project
+	store := s.stateStore
+	s.mu.RUnlock()
+	if store != nil {
+		if info, err := src.Stat(); err == nil {
+			if err := store.MarkFileCopied(project, relPath, info.Size(), info.ModTime()); err != nil {
+				log.Error().Err(err).Str("file", relPath).Msg("Failed to persist copied file state")
+			}
+		}
+	}
 
 	// Track capture completion
 	s.trackCaptureCompletion(filepath.Base(sourcePath), task.node)

@@ -285,9 +285,10 @@ func (s *Server) handleStartSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Project        string `json:"project"`
-		Destination    string `json:"destination"`
-		MaxParallelism int    `json:"max_parallelism"`
+		Project         string `json:"project"`
+		Destination     string `json:"destination"`
+		MaxParallelism  int    `json:"max_parallelism"`
+		ForceFullResync bool   `json:"force_full_resync"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -309,7 +310,7 @@ func (s *Server) handleStartSync(w http.ResponseWriter, r *http.Request) {
 
 	// Start sync
 	ctx := context.Background()
-	if err := s.syncService.Start(ctx, req.Project, req.Destination, req.MaxParallelism); err != nil {
+	if err := s.syncService.Start(ctx, req.Project, req.Destination, req.MaxParallelism, req.ForceFullResync); err != nil {
 		log.Error().Err(err).Msg("Failed to start sync")
 		http.Error(w, fmt.Sprintf("Failed to start sync: %v", err), http.StatusInternalServerError)
 		return
@@ -321,7 +322,7 @@ func (s *Server) handleStartSync(w http.ResponseWriter, r *http.Request) {
 		Payload: models.LogMessage{
 			Timestamp: time.Now(),
 			Level:     "info",
-			Message:   fmt.Sprintf("Started synchronization: project=%s, destination=%s", req.Project, req.Destination),
+			Message:   fmt.Sprintf("Started synchronization: project=%s, destination=%s, full_resync=%t", req.Project, req.Destination, req.ForceFullResync),
 		},
 	})
 
@@ -807,10 +808,11 @@ func (s *Server) handleDashboardStartSync(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		Project        string   `json:"project"`
-		Destination    string   `json:"destination"`
-		MaxParallelism int      `json:"max_parallelism"`
-		Targets        []string `json:"targets"`
+		Project         string   `json:"project"`
+		Destination     string   `json:"destination"`
+		MaxParallelism  int      `json:"max_parallelism"`
+		ForceFullResync bool     `json:"force_full_resync"`
+		Targets         []string `json:"targets"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -824,9 +826,10 @@ func (s *Server) handleDashboardStartSync(w http.ResponseWriter, r *http.Request
 	}
 
 	body, err := json.Marshal(map[string]interface{}{
-		"project":         req.Project,
-		"destination":     req.Destination,
-		"max_parallelism": req.MaxParallelism,
+		"project":           req.Project,
+		"destination":       req.Destination,
+		"max_parallelism":   req.MaxParallelism,
+		"force_full_resync": req.ForceFullResync,
 	})
 	if err != nil {
 		http.Error(w, "Failed to build request", http.StatusInternalServerError)
@@ -951,12 +954,20 @@ func (s *Server) buildDashboardSummary(states []models.DashboardInstanceState) m
 	}
 	completedValues := make([]int, 0, len(states))
 	testValues := make([]int, 0, len(states))
+	lastCaptureValues := make([]string, 0, len(states))
+	lastTestCaptureValues := make([]string, 0, len(states))
 
 	for _, state := range states {
 		if state.Available {
 			summary.AvailableInstances++
 			completedValues = append(completedValues, state.Status.CompletedCaptures)
 			testValues = append(testValues, state.Status.CompletedTestCaptures)
+			if strings.TrimSpace(state.Status.LastCaptureNumber) != "" {
+				lastCaptureValues = append(lastCaptureValues, state.Status.LastCaptureNumber)
+			}
+			if strings.TrimSpace(state.Status.LastTestCaptureNumber) != "" {
+				lastTestCaptureValues = append(lastTestCaptureValues, state.Status.LastTestCaptureNumber)
+			}
 		}
 		if state.Status.IsRunning {
 			summary.RunningInstances++
@@ -968,8 +979,55 @@ func (s *Server) buildDashboardSummary(states []models.DashboardInstanceState) m
 
 	summary.TotalCompletedCaptures = minIntSlice(completedValues)
 	summary.TotalCompletedTest = minIntSlice(testValues)
+	summary.LastCaptureNumber = maxCaptureNumber(lastCaptureValues)
+	summary.LastTestCaptureNumber = maxCaptureNumber(lastTestCaptureValues)
+
+	project := dashboardProjectName(states)
+	if s.stateStore != nil && project != "" {
+		persisted, err := s.stateStore.LoadProjectStatus(project)
+		if err == nil {
+			summary.TotalCompletedCaptures = persisted.CompletedCaptures
+			summary.TotalCompletedTest = persisted.CompletedTestCaptures
+			summary.LastCaptureNumber = persisted.LastCaptureNumber
+			summary.LastTestCaptureNumber = persisted.LastTestCaptureNumber
+		}
+	}
 
 	return summary
+}
+
+func dashboardProjectName(states []models.DashboardInstanceState) string {
+	counts := make(map[string]int)
+	bestProject := ""
+	bestCount := 0
+
+	for _, state := range states {
+		project := strings.TrimSpace(state.Status.Project)
+		if project == "" {
+			continue
+		}
+		counts[project]++
+		if counts[project] > bestCount {
+			bestCount = counts[project]
+			bestProject = project
+		}
+	}
+
+	return bestProject
+}
+
+func maxCaptureNumber(values []string) string {
+	maxValue := ""
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if maxValue == "" || value > maxValue {
+			maxValue = value
+		}
+	}
+	return maxValue
 }
 
 func minIntSlice(values []int) int {

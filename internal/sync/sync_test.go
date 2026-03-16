@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -216,6 +217,59 @@ func TestTrackCaptureCompletionAggregatesAcrossSplitInstancesWithSharedState(t *
 	}
 	if got := svcB.GetStatus().CompletedCaptures; got != 1 {
 		t.Fatalf("svcB completed captures = %d, want 1", got)
+	}
+}
+
+func TestShouldCopyFileSkipsFilesMarkedCopiedInStateStore(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	sourceRoot := filepath.Join(baseDir, "source")
+	destRoot := filepath.Join(baseDir, "dest")
+	if err := os.MkdirAll(sourceRoot, 0755); err != nil {
+		t.Fatalf("failed to create source root: %v", err)
+	}
+	if err := os.MkdirAll(destRoot, 0755); err != nil {
+		t.Fatalf("failed to create destination root: %v", err)
+	}
+
+	store, err := state.New(filepath.Join(baseDir, "state.db"), "ucxsync-test")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount")
+	if err := svc.SetStateStore(store); err != nil {
+		t.Fatalf("SetStateStore returned error: %v", err)
+	}
+	svc.mu.Lock()
+	svc.project = "ProjA"
+	svc.mu.Unlock()
+
+	sourceFile := filepath.Join(sourceRoot, "capture.raw")
+	content := []byte("payload")
+	if err := os.WriteFile(sourceFile, content, 0644); err != nil {
+		t.Fatalf("failed to create source file: %v", err)
+	}
+	info, err := os.Stat(sourceFile)
+	if err != nil {
+		t.Fatalf("failed to stat source file: %v", err)
+	}
+
+	if err := store.MarkFileCopied("ProjA", "capture.raw", info.Size(), info.ModTime()); err != nil {
+		t.Fatalf("MarkFileCopied returned error: %v", err)
+	}
+
+	if shouldCopy := svc.shouldCopyFile(sourceFile, sourceRoot, destRoot); shouldCopy {
+		t.Fatal("expected shouldCopyFile to skip DB-marked file even when destination is missing")
+	}
+
+	svc.mu.Lock()
+	svc.forceFullResync = true
+	svc.mu.Unlock()
+	if shouldCopy := svc.shouldCopyFile(sourceFile, sourceRoot, destRoot); !shouldCopy {
+		t.Fatal("expected full resync mode to force re-copy of DB-marked file")
 	}
 }
 

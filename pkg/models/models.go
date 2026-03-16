@@ -153,14 +153,16 @@ type DashboardInstanceState struct {
 
 // DashboardSummary contains aggregate counters across all configured instances.
 type DashboardSummary struct {
-	ConfiguredInstances    int `json:"configured_instances"`
-	AvailableInstances     int `json:"available_instances"`
-	RunningInstances       int `json:"running_instances"`
-	TotalCompletedCaptures int `json:"total_completed_captures"`
-	TotalCompletedTest     int `json:"total_completed_test_captures"`
-	TotalActiveFileOps     int `json:"total_active_file_operations"`
-	TotalMaxParallelism    int `json:"total_max_parallelism"`
-	TotalActiveTasks       int `json:"total_active_tasks"`
+	ConfiguredInstances    int    `json:"configured_instances"`
+	AvailableInstances     int    `json:"available_instances"`
+	RunningInstances       int    `json:"running_instances"`
+	TotalCompletedCaptures int    `json:"total_completed_captures"`
+	TotalCompletedTest     int    `json:"total_completed_test_captures"`
+	LastCaptureNumber      string `json:"last_capture_number"`
+	LastTestCaptureNumber  string `json:"last_test_capture_number"`
+	TotalActiveFileOps     int    `json:"total_active_file_operations"`
+	TotalMaxParallelism    int    `json:"total_max_parallelism"`
+	TotalActiveTasks       int    `json:"total_active_tasks"`
 }
 
 // DashboardOverview is the main payload used by the shared dashboard UI.

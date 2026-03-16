@@ -145,6 +145,14 @@ func (s *Store) init() error {
 				REFERENCES captures(service_name, project_name, capture_number)
 				ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS copied_files (
+			project_name TEXT NOT NULL,
+			relative_path TEXT NOT NULL,
+			file_size INTEGER NOT NULL DEFAULT 0,
+			mod_time_unix_ns INTEGER NOT NULL DEFAULT 0,
+			copied_at TEXT NOT NULL,
+			PRIMARY KEY(project_name, relative_path)
+		);`,
 	}
 
 	for _, stmt := range ddl {
@@ -304,6 +312,56 @@ func (s *Store) LoadProjects() ([]models.ProjectInfo, error) {
 	return projects, rows.Err()
 }
 
+func (s *Store) IsFileCopied(project, relativePath string, fileSize int64, modTime time.Time) (bool, error) {
+	if strings.TrimSpace(project) == "" || strings.TrimSpace(relativePath) == "" {
+		return false, nil
+	}
+
+	var storedSize int64
+	var storedModTime int64
+	err := s.db.QueryRow(`
+		SELECT file_size, mod_time_unix_ns
+		FROM copied_files
+		WHERE project_name = ? AND relative_path = ?
+	`, project, normalizeRelativePath(relativePath)).Scan(&storedSize, &storedModTime)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return storedSize == fileSize && storedModTime == modTime.UTC().UnixNano(), nil
+}
+
+func (s *Store) MarkFileCopied(project, relativePath string, fileSize int64, modTime time.Time) error {
+	if strings.TrimSpace(project) == "" || strings.TrimSpace(relativePath) == "" {
+		return nil
+	}
+
+	relativePath = normalizeRelativePath(relativePath)
+	return s.execWrite(`
+		INSERT INTO copied_files (project_name, relative_path, file_size, mod_time_unix_ns, copied_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(project_name, relative_path)
+		DO UPDATE SET
+			file_size = excluded.file_size,
+			mod_time_unix_ns = excluded.mod_time_unix_ns,
+			copied_at = excluded.copied_at
+	`, project, relativePath, fileSize, modTime.UTC().UnixNano(), time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+func (s *Store) ResetCopiedFiles(project string) error {
+	if strings.TrimSpace(project) == "" {
+		return nil
+	}
+
+	return s.execWrite(`
+		DELETE FROM copied_files
+		WHERE project_name = ?
+	`, project)
+}
+
 func (s *Store) RecordCapture(obs CaptureObservation) (models.PersistedCaptureStatus, bool, error) {
 	if strings.TrimSpace(obs.Project) == "" {
 		return models.PersistedCaptureStatus{}, false, nil
@@ -325,6 +383,7 @@ func (s *Store) RecordCapture(obs CaptureObservation) (models.PersistedCaptureSt
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(service_name, project_name, capture_number)
 		DO UPDATE SET
+			is_test = CASE WHEN captures.is_test = 1 OR excluded.is_test = 1 THEN 1 ELSE 0 END,
 			data_type = excluded.data_type,
 			sensor_code = excluded.sensor_code,
 			session_id = excluded.session_id,
@@ -416,6 +475,24 @@ func (s *Store) RecordCapture(obs CaptureObservation) (models.PersistedCaptureSt
 	}
 
 	return resultStatus, resultDone, nil
+}
+
+func (s *Store) LoadProjectStatus(project string) (models.PersistedCaptureStatus, error) {
+	if strings.TrimSpace(project) == "" {
+		return models.PersistedCaptureStatus{}, nil
+	}
+
+	stats, err := s.projectStats(project)
+	if err != nil {
+		return models.PersistedCaptureStatus{}, err
+	}
+
+	return models.PersistedCaptureStatus{
+		CompletedCaptures:     stats.CompletedCaptures,
+		CompletedTestCaptures: stats.CompletedTestCaptures,
+		LastCaptureNumber:     stats.LastCaptureNumber,
+		LastTestCaptureNumber: stats.LastTestCaptureNumber,
+	}, nil
 }
 
 func (s *Store) persistedCaptureStatusTx(tx *sql.Tx, project string) (models.PersistedCaptureStatus, error) {
@@ -579,6 +656,10 @@ func isSQLiteBusyError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "sqlite_busy") || strings.Contains(message, "database is locked") || strings.Contains(message, "database table is locked")
+}
+
+func normalizeRelativePath(path string) string {
+	return filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
 }
 
 func SortProjects(projects []models.ProjectInfo) {

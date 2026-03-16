@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zangezia/UCXSync/pkg/models"
 )
@@ -236,5 +237,151 @@ func TestStoreConcurrentWritesSharedDatabase(t *testing.T) {
 	}
 	if statusA.CompletedCaptures != 1 {
 		t.Fatalf("expected completed capture count 1 after concurrent writes, got %d", statusA.CompletedCaptures)
+	}
+}
+
+func TestStoreTracksCopiedFiles(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	modTime := time.Unix(1710000000, 123).UTC()
+
+	marked, err := store.IsFileCopied("ProjA", "raw/file.raw", 100, modTime)
+	if err != nil {
+		t.Fatalf("IsFileCopied returned error: %v", err)
+	}
+	if marked {
+		t.Fatal("expected file to be absent before mark")
+	}
+
+	if err := store.MarkFileCopied("ProjA", "raw/file.raw", 100, modTime); err != nil {
+		t.Fatalf("MarkFileCopied returned error: %v", err)
+	}
+
+	marked, err = store.IsFileCopied("ProjA", "raw/file.raw", 100, modTime)
+	if err != nil {
+		t.Fatalf("IsFileCopied after mark returned error: %v", err)
+	}
+	if !marked {
+		t.Fatal("expected file to be marked copied")
+	}
+
+	marked, err = store.IsFileCopied("ProjA", "raw/file.raw", 101, modTime)
+	if err != nil {
+		t.Fatalf("IsFileCopied with different size returned error: %v", err)
+	}
+	if marked {
+		t.Fatal("expected different file size to invalidate copied mark")
+	}
+
+	if err := store.ResetCopiedFiles("ProjA"); err != nil {
+		t.Fatalf("ResetCopiedFiles returned error: %v", err)
+	}
+
+	marked, err = store.IsFileCopied("ProjA", "raw/file.raw", 100, modTime)
+	if err != nil {
+		t.Fatalf("IsFileCopied after reset returned error: %v", err)
+	}
+	if marked {
+		t.Fatal("expected copied mark to be removed after reset")
+	}
+}
+
+func TestStorePromotesCaptureToTestWhenRawArrivesAfterMetadata(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	if _, err := store.StartRun("ProjTest", "/ucdata", 4); err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	steps := []CaptureObservation{
+		{
+			Project: "ProjTest",
+			Info: models.CaptureInfo{
+				DataType:      "EAD",
+				CaptureNumber: "00042",
+				ProjectName:   "ProjTest",
+				SessionID:     "SESSION_TEST",
+				IsTest:        false,
+			},
+			FileKey:          "xml:CU",
+			RequiredRawFiles: 2,
+			RequireXML:       true,
+			RequireDAT:       true,
+		},
+		{
+			Project: "ProjTest",
+			Info: models.CaptureInfo{
+				DataType:      "Lvl0X",
+				CaptureNumber: "00042",
+				ProjectName:   "ProjTest",
+				SensorCode:    "00-00",
+				SessionID:     "SESSION_TEST",
+				IsVerified:    false,
+				IsTest:        true,
+			},
+			FileKey:          "raw:00-00",
+			RequiredRawFiles: 2,
+			RequireXML:       true,
+			RequireDAT:       true,
+		},
+		{
+			Project: "ProjTest",
+			Info: models.CaptureInfo{
+				DataType:      "Lvl0X",
+				CaptureNumber: "00042",
+				ProjectName:   "ProjTest",
+				SensorCode:    "00-01",
+				SessionID:     "SESSION_TEST",
+				IsVerified:    false,
+				IsTest:        true,
+			},
+			FileKey:          "raw:00-01",
+			RequiredRawFiles: 2,
+			RequireXML:       true,
+			RequireDAT:       true,
+		},
+		{
+			Project: "ProjTest",
+			Info: models.CaptureInfo{
+				DataType:      "RawQv",
+				CaptureNumber: "00042",
+				ProjectName:   "ProjTest",
+				SessionID:     "SESSION_TEST",
+				IsTest:        false,
+			},
+			FileKey:          "dat:CU",
+			RequiredRawFiles: 2,
+			RequireXML:       true,
+			RequireDAT:       true,
+		},
+	}
+
+	var persisted models.PersistedCaptureStatus
+	for _, step := range steps {
+		var err error
+		persisted, _, err = store.RecordCapture(step)
+		if err != nil {
+			t.Fatalf("RecordCapture(%s) returned error: %v", step.FileKey, err)
+		}
+	}
+
+	if persisted.CompletedTestCaptures != 1 {
+		t.Fatalf("CompletedTestCaptures = %d, want 1", persisted.CompletedTestCaptures)
+	}
+	if persisted.LastTestCaptureNumber != "00042" {
+		t.Fatalf("LastTestCaptureNumber = %q, want 00042", persisted.LastTestCaptureNumber)
+	}
+	if persisted.CompletedCaptures != 0 {
+		t.Fatalf("CompletedCaptures = %d, want 0", persisted.CompletedCaptures)
+	}
+
+	loaded, err := store.LoadProjectStatus("ProjTest")
+	if err != nil {
+		t.Fatalf("LoadProjectStatus returned error: %v", err)
+	}
+	if loaded.CompletedTestCaptures != 1 {
+		t.Fatalf("LoadProjectStatus CompletedTestCaptures = %d, want 1", loaded.CompletedTestCaptures)
 	}
 }

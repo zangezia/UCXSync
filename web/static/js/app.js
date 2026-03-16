@@ -46,6 +46,7 @@ class UCXSyncApp {
         this.destinationSelect = document.getElementById('destination');
         this.destinationCustom = document.getElementById('destination-custom');
         this.parallelismInput = document.getElementById('parallelism');
+        this.forceFullResyncCheckbox = document.getElementById('force-full-resync');
         this.startBtn = document.getElementById('start-btn');
         this.stopBtn = document.getElementById('stop-btn');
         this.refreshBtn = document.getElementById('refresh-projects');
@@ -142,6 +143,7 @@ class UCXSyncApp {
         this.destinationSelect.addEventListener('change', () => this.saveSettings());
         this.destinationCustom.addEventListener('change', () => this.saveSettings());
         this.parallelismInput.addEventListener('change', () => this.saveSettings());
+        this.forceFullResyncCheckbox?.addEventListener('change', () => this.saveSettings());
     }
 
     async detectMode() {
@@ -339,6 +341,7 @@ class UCXSyncApp {
         const project = this.projectSelect.value;
         const destination = this.getCurrentDestination();
         const parallelism = parseInt(this.parallelismInput.value, 10);
+        const forceFullResync = this.forceFullResyncCheckbox?.checked || false;
 
         if (!project || !destination) {
             this.log('✗ Укажите проект и папку назначения', 'error');
@@ -349,7 +352,7 @@ class UCXSyncApp {
             await this.fetchJSON('/api/sync/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ project, destination, max_parallelism: parallelism })
+                body: JSON.stringify({ project, destination, max_parallelism: parallelism, force_full_resync: forceFullResync })
             });
 
             this.isRunning = true;
@@ -364,6 +367,7 @@ class UCXSyncApp {
         const project = this.projectSelect.value;
         const destination = this.getCurrentDestination();
         const parallelism = parseInt(this.parallelismInput.value, 10);
+        const forceFullResync = this.forceFullResyncCheckbox?.checked || false;
 
         if (!project || !destination) {
             this.log('✗ Укажите проект и папку назначения', 'error');
@@ -378,6 +382,7 @@ class UCXSyncApp {
                     project,
                     destination,
                     max_parallelism: parallelism,
+                    force_full_resync: forceFullResync,
                     targets
                 })
             });
@@ -422,6 +427,9 @@ class UCXSyncApp {
         this.destinationSelect.disabled = this.isRunning;
         this.destinationCustom.disabled = this.isRunning;
         this.parallelismInput.disabled = this.isRunning;
+        if (this.forceFullResyncCheckbox) {
+            this.forceFullResyncCheckbox.disabled = this.isRunning;
+        }
     }
 
     async mountShares() {
@@ -531,7 +539,7 @@ class UCXSyncApp {
 
     updateDashboardSummary(summary, instances) {
         this.completedCapturesEl.textContent = summary.total_completed_captures || 0;
-        this.lastCaptureEl.textContent = this.formatDashboardLastCapture(instances);
+        this.lastCaptureEl.textContent = summary.last_capture_number || this.formatDashboardLastCapture(instances);
         this.testCapturesEl.textContent = summary.total_completed_test_captures || 0;
         this.activeOpsCountEl.textContent = summary.total_active_file_operations || 0;
         this.maxParallelismEl.textContent = summary.total_max_parallelism || 0;
@@ -813,7 +821,8 @@ class UCXSyncApp {
             project: this.projectSelect.value,
             destination: this.destinationSelect.value,
             destinationCustom: this.destinationCustom.value,
-            parallelism: this.parallelismInput.value
+            parallelism: this.parallelismInput.value,
+            forceFullResync: this.forceFullResyncCheckbox?.checked || false
         };
         localStorage.setItem('ucxsync_settings', JSON.stringify(settings));
     }
@@ -827,6 +836,7 @@ class UCXSyncApp {
                 if (settings.parallelism) this.parallelismInput.value = settings.parallelism;
                 if (settings.project) this.projectSelect.value = settings.project;
                 if (settings.destination) this.destinationSelect.value = settings.destination;
+                if (this.forceFullResyncCheckbox) this.forceFullResyncCheckbox.checked = !!settings.forceFullResync;
             } catch (error) {
                 console.error('Failed to load saved settings:', error);
             }
