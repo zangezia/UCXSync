@@ -104,19 +104,20 @@ var (
 	// 06-00 - sensor code (00-00, 00-01, 00-02, 01-00, etc.)
 	// BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E - unique session ID
 	// .raw - file extension
-	captureRegex = regexp.MustCompile(`^(Lvl\d+X?)-(\d+)-?(T-)?([^-]+)-(\d+-\d+)-([A-F0-9_]+)\.raw$`)
+	captureRegex = regexp.MustCompile(`^(Lvl\d+X?)-(\d+)(?:-(T))?-(.+)-(\d+-\d+)-([A-F0-9_]+)\.raw$`)
 
 	// XML metadata file name format (from CU node):
 	// EAD - prefix for metadata
 	// 00001 - capture number
+	// T (optional) - test capture marker
 	// Arh2k_mezen_200725 - project name
 	// BD11EBB0_BE00_4BE7_BC66_9DED8D740C2E - unique session ID
 	// .xml - file extension
 	// Note: XML file may be missing for test captures
-	metadataRegex = regexp.MustCompile(`^EAD-(\d+)-([^-]+)-([A-F0-9_]+)\.xml$`)
+	metadataRegex = regexp.MustCompile(`^EAD-(\d+)(?:-(T))?-(.+)-([A-F0-9_]+)\.xml$`)
 
 	// RawQv quality file (optional supplemental file per capture)
-	rawQvRegex = regexp.MustCompile(`^RawQv-(\d+)-([^-]+)-([A-F0-9_]+)\.dat$`)
+	rawQvRegex = regexp.MustCompile(`^RawQv-(\d+)(?:-(T))?-(.+)-([A-F0-9_]+)\.dat$`)
 )
 
 const defaultDataMountPoint = "/ucdata"
@@ -961,18 +962,19 @@ func parseCaptureFileName(filename string) *models.CaptureInfo {
 
 func parseMetadataFileName(filename string) *models.CaptureInfo {
 	matches := metadataRegex.FindStringSubmatch(filename)
-	if len(matches) != 4 {
+	if len(matches) != 5 {
 		return nil
 	}
 
 	captureNumber := matches[1]
-	projectName := matches[2]
-	sessionID := matches[3]
+	testMarker := matches[2]
+	projectName := matches[3]
+	sessionID := matches[4]
 
 	return &models.CaptureInfo{
 		DataType:      "EAD",
 		CaptureNumber: captureNumber,
-		IsTest:        false, // XML files are only for non-test captures
+		IsTest:        testMarker != "",
 		ProjectName:   projectName,
 		SensorCode:    "",
 		SessionID:     sessionID,
@@ -982,17 +984,17 @@ func parseMetadataFileName(filename string) *models.CaptureInfo {
 
 func parseRawQvFileName(filename string) *models.CaptureInfo {
 	matches := rawQvRegex.FindStringSubmatch(filename)
-	if len(matches) != 4 {
+	if len(matches) != 5 {
 		return nil
 	}
 
 	return &models.CaptureInfo{
 		DataType:      "RawQv",
 		CaptureNumber: matches[1],
-		IsTest:        false,
-		ProjectName:   matches[2],
+		IsTest:        matches[2] != "",
+		ProjectName:   matches[3],
 		SensorCode:    "",
-		SessionID:     matches[3],
+		SessionID:     matches[4],
 		IsVerified:    true,
 	}
 }

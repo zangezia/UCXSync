@@ -114,6 +114,51 @@ func TestParseRawQvFileName(t *testing.T) {
 	}
 }
 
+func TestParseCaptureFileNameWithTestMarkerAndUnderscoreProject(t *testing.T) {
+	info := parseCaptureFileName("Lvl0X-00001-T-Test_6-00-00-E55452A3_7F5A_4E6C_A049_945BF67F9D17.raw")
+	if info == nil {
+		t.Fatal("expected test RAW file to be parsed")
+	}
+	if !info.IsTest {
+		t.Fatal("expected file to be recognized as test capture")
+	}
+	if info.CaptureNumber != "00001" {
+		t.Fatalf("CaptureNumber = %q, want 00001", info.CaptureNumber)
+	}
+	if info.ProjectName != "Test_6" {
+		t.Fatalf("ProjectName = %q, want Test_6", info.ProjectName)
+	}
+	if info.SensorCode != "00-00" {
+		t.Fatalf("SensorCode = %q, want 00-00", info.SensorCode)
+	}
+}
+
+func TestParseMetadataFileNameWithTestMarker(t *testing.T) {
+	info := parseMetadataFileName("EAD-00001-T-Test_6-E55452A3_7F5A_4E6C_A049_945BF67F9D17.xml")
+	if info == nil {
+		t.Fatal("expected test EAD file to be parsed")
+	}
+	if !info.IsTest {
+		t.Fatal("expected metadata file to preserve test marker")
+	}
+	if info.ProjectName != "Test_6" {
+		t.Fatalf("ProjectName = %q, want Test_6", info.ProjectName)
+	}
+}
+
+func TestParseRawQvFileNameWithTestMarker(t *testing.T) {
+	info := parseRawQvFileName("RawQv-00001-T-Test_6-E55452A3_7F5A_4E6C_A049_945BF67F9D17.dat")
+	if info == nil {
+		t.Fatal("expected test RawQv file to be parsed")
+	}
+	if !info.IsTest {
+		t.Fatal("expected RawQv file to preserve test marker")
+	}
+	if info.ProjectName != "Test_6" {
+		t.Fatalf("ProjectName = %q, want Test_6", info.ProjectName)
+	}
+}
+
 func TestFormatCaptureSummaryIncludesRawQv(t *testing.T) {
 	summary := formatCaptureSummary(13, true, true)
 	expected := "13 RAW + 1 XML + 1 RawQv = 15 files"
@@ -258,6 +303,43 @@ func TestTrackTestCaptureCompletionWithoutMetadataAndRawQv(t *testing.T) {
 	}
 	if status.LastCaptureNumber != "" {
 		t.Fatalf("LastCaptureNumber = %q, want empty for test-only completion", status.LastCaptureNumber)
+	}
+}
+
+func TestTrackTestCaptureCompletionWithProvidedFilenamePattern(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "shared-state.db")
+	store, err := state.New(path, "ucxsync-test")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount-a")
+	if err := svc.SetStateStore(store); err != nil {
+		t.Fatalf("SetStateStore returned error: %v", err)
+	}
+	if _, err := store.StartRun("Test_6", "/tmp", 4); err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	svc.mu.Lock()
+	svc.project = "Test_6"
+	svc.requiredSensors = map[string]struct{}{"00-00": {}, "00-01": {}}
+	svc.mu.Unlock()
+
+	svc.trackCaptureCompletion("Lvl0X-00001-T-Test_6-00-00-E55452A3_7F5A_4E6C_A049_945BF67F9D17.raw", "WU01")
+	svc.trackCaptureCompletion("Lvl0X-00001-T-Test_6-00-01-E55452A3_7F5A_4E6C_A049_945BF67F9D17.raw", "WU02")
+	svc.trackCaptureCompletion("EAD-00001-T-Test_6-E55452A3_7F5A_4E6C_A049_945BF67F9D17.xml", "CU")
+	svc.trackCaptureCompletion("RawQv-00001-T-Test_6-E55452A3_7F5A_4E6C_A049_945BF67F9D17.dat", "CU")
+
+	status := svc.GetStatus()
+	if status.CompletedTestCaptures != 1 {
+		t.Fatalf("CompletedTestCaptures = %d, want 1", status.CompletedTestCaptures)
+	}
+	if status.LastTestCaptureNumber != "00001" {
+		t.Fatalf("LastTestCaptureNumber = %q, want 00001", status.LastTestCaptureNumber)
 	}
 }
 
