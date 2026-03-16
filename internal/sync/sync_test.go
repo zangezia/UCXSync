@@ -220,6 +220,47 @@ func TestTrackCaptureCompletionAggregatesAcrossSplitInstancesWithSharedState(t *
 	}
 }
 
+func TestTrackTestCaptureCompletionWithoutMetadataAndRawQv(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "shared-state.db")
+	store, err := state.New(path, "ucxsync-test")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount-a")
+	if err := svc.SetStateStore(store); err != nil {
+		t.Fatalf("SetStateStore returned error: %v", err)
+	}
+	if _, err := store.StartRun("ProjTest", "/tmp", 4); err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	svc.mu.Lock()
+	svc.project = "ProjTest"
+	svc.requiredSensors = map[string]struct{}{"00-00": {}, "00-01": {}}
+	svc.mu.Unlock()
+
+	svc.trackCaptureCompletion("Lvl0X-00013-T-ProjTest-00-00-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", "WU01")
+	svc.trackCaptureCompletion("Lvl0X-00013-T-ProjTest-00-01-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", "WU02")
+
+	status := svc.GetStatus()
+	if status.CompletedTestCaptures != 1 {
+		t.Fatalf("CompletedTestCaptures = %d, want 1", status.CompletedTestCaptures)
+	}
+	if status.LastTestCaptureNumber != "00013" {
+		t.Fatalf("LastTestCaptureNumber = %q, want 00013", status.LastTestCaptureNumber)
+	}
+	if status.CompletedCaptures != 0 {
+		t.Fatalf("CompletedCaptures = %d, want 0", status.CompletedCaptures)
+	}
+	if status.LastCaptureNumber != "" {
+		t.Fatalf("LastCaptureNumber = %q, want empty for test-only completion", status.LastCaptureNumber)
+	}
+}
+
 func TestShouldCopyFileSkipsFilesMarkedCopiedInStateStore(t *testing.T) {
 	t.Parallel()
 

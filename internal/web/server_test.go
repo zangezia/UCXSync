@@ -150,3 +150,37 @@ func TestBuildDashboardSummaryUsesSharedStateStoreForCommonCaptureStats(t *testi
 		t.Fatalf("LastCaptureNumber = %q, want 00077", summary.LastCaptureNumber)
 	}
 }
+
+func TestBuildDashboardSummaryUsesLatestTestCaptureAsCommonLastCapture(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{}
+	states := []models.DashboardInstanceState{
+		{
+			Available: true,
+			Status: models.SyncStatus{
+				CompletedCaptures:     12,
+				CompletedTestCaptures: 1,
+				LastCaptureNumber:     "00012",
+				LastTestCaptureNumber: "00013",
+			},
+		},
+		{
+			Available: true,
+			Status: models.SyncStatus{
+				CompletedCaptures:     12,
+				CompletedTestCaptures: 1,
+				LastCaptureNumber:     "00012",
+				LastTestCaptureNumber: "00013",
+			},
+		},
+	}
+
+	summary := server.buildDashboardSummary(states)
+	if summary.LastCaptureNumber != "00013" {
+		t.Fatalf("LastCaptureNumber = %q, want 00013", summary.LastCaptureNumber)
+	}
+	if summary.TotalCompletedTest != 1 {
+		t.Fatalf("TotalCompletedTest = %d, want 1", summary.TotalCompletedTest)
+	}
+}

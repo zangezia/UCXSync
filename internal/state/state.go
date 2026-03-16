@@ -418,13 +418,15 @@ func (s *Store) RecordCapture(obs CaptureObservation) (models.PersistedCaptureSt
 			inserted = affected > 0
 		}
 
-		rawCount, hasXML, hasDAT, alreadyCompleted, err := s.captureProgress(tx, obs.Project, obs.Info.CaptureNumber)
+		rawCount, hasXML, hasDAT, isTest, alreadyCompleted, err := s.captureProgress(tx, obs.Project, obs.Info.CaptureNumber)
 		if err != nil {
 			return err
 		}
 
 		completed := false
-		shouldComplete := rawCount == obs.RequiredRawFiles && (!obs.RequireXML || hasXML) && (!obs.RequireDAT || hasDAT)
+		requireXML := obs.RequireXML && !isTest
+		requireDAT := obs.RequireDAT && !isTest
+		shouldComplete := rawCount == obs.RequiredRawFiles && (!requireXML || hasXML) && (!requireDAT || hasDAT)
 		if shouldComplete && !alreadyCompleted {
 			completed = inserted || !alreadyCompleted
 		}
@@ -509,17 +511,18 @@ func (s *Store) persistedCaptureStatusTx(tx *sql.Tx, project string) (models.Per
 	}, nil
 }
 
-func (s *Store) captureProgress(tx *sql.Tx, project, captureNumber string) (rawCount int, hasXML bool, hasDAT bool, completed bool, err error) {
-	var hasXMLInt, hasDATInt, completedInt int
+func (s *Store) captureProgress(tx *sql.Tx, project, captureNumber string) (rawCount int, hasXML bool, hasDAT bool, isTest bool, completed bool, err error) {
+	var hasXMLInt, hasDATInt, isTestInt, completedInt int
 	aggregateService := aggregateCaptureServiceName
 	err = tx.QueryRow(`
 		SELECT
 			(SELECT COUNT(*) FROM capture_files WHERE service_name = ? AND project_name = ? AND capture_number = ? AND file_key GLOB 'raw:[0-9][0-9]-[0-9][0-9]') AS raw_count,
 			(SELECT COUNT(*) FROM capture_files WHERE service_name = ? AND project_name = ? AND capture_number = ? AND file_key = 'xml:CU') AS has_xml,
 			(SELECT COUNT(*) FROM capture_files WHERE service_name = ? AND project_name = ? AND capture_number = ? AND file_key = 'dat:CU') AS has_dat,
+			COALESCE((SELECT is_test FROM captures WHERE service_name = ? AND project_name = ? AND capture_number = ?), 0) AS is_test,
 			COALESCE((SELECT completed FROM captures WHERE service_name = ? AND project_name = ? AND capture_number = ?), 0) AS completed
-	`, aggregateService, project, captureNumber, aggregateService, project, captureNumber, aggregateService, project, captureNumber, aggregateService, project, captureNumber).Scan(&rawCount, &hasXMLInt, &hasDATInt, &completedInt)
-	return rawCount, hasXMLInt > 0, hasDATInt > 0, completedInt > 0, err
+	`, aggregateService, project, captureNumber, aggregateService, project, captureNumber, aggregateService, project, captureNumber, aggregateService, project, captureNumber, aggregateService, project, captureNumber).Scan(&rawCount, &hasXMLInt, &hasDATInt, &isTestInt, &completedInt)
+	return rawCount, hasXMLInt > 0, hasDATInt > 0, isTestInt > 0, completedInt > 0, err
 }
 
 func (s *Store) projectStats(project string) (StatusSnapshot, error) {

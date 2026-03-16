@@ -979,7 +979,7 @@ func (s *Server) buildDashboardSummary(states []models.DashboardInstanceState) m
 
 	summary.TotalCompletedCaptures = minIntSlice(completedValues)
 	summary.TotalCompletedTest = minIntSlice(testValues)
-	summary.LastCaptureNumber = maxCaptureNumber(lastCaptureValues)
+	summary.LastCaptureNumber = maxCaptureNumber(append(lastCaptureValues, lastTestCaptureValues...))
 	summary.LastTestCaptureNumber = maxCaptureNumber(lastTestCaptureValues)
 
 	project := dashboardProjectName(states)
@@ -988,7 +988,7 @@ func (s *Server) buildDashboardSummary(states []models.DashboardInstanceState) m
 		if err == nil {
 			summary.TotalCompletedCaptures = persisted.CompletedCaptures
 			summary.TotalCompletedTest = persisted.CompletedTestCaptures
-			summary.LastCaptureNumber = persisted.LastCaptureNumber
+			summary.LastCaptureNumber = maxCaptureNumber([]string{persisted.LastCaptureNumber, persisted.LastTestCaptureNumber})
 			summary.LastTestCaptureNumber = persisted.LastTestCaptureNumber
 		}
 	}
