@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -17,9 +18,15 @@ import (
 type Store struct {
 	db          *sql.DB
 	serviceName string
+	writeMu     sync.Mutex
 }
 
 const aggregateCaptureServiceName = "__capture_aggregate__"
+
+const (
+	busyRetryCount = 8
+	busyRetryDelay = 100 * time.Millisecond
+)
 
 type StatusSnapshot struct {
 	IsRunning             bool
@@ -57,6 +64,10 @@ func New(path, serviceName string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+	db.SetConnMaxIdleTime(0)
 
 	store := &Store{db: db, serviceName: serviceName}
 	if err := store.init(); err != nil {
@@ -146,12 +157,11 @@ func (s *Store) init() error {
 }
 
 func (s *Store) ensureStatusRow() error {
-	_, err := s.db.Exec(`
+	return s.execWrite(`
 		INSERT INTO sync_status (service_name)
 		VALUES (?)
 		ON CONFLICT(service_name) DO NOTHING
 	`, s.serviceName)
-	return err
 }
 
 func (s *Store) LoadStatus() (StatusSnapshot, error) {
@@ -193,7 +203,7 @@ func (s *Store) StartRun(project, destination string, maxParallelism int) (Statu
 		return StatusSnapshot{}, err
 	}
 
-	_, err = s.db.Exec(`
+	err = s.execWrite(`
 		UPDATE sync_status
 		SET is_running = 1,
 		    project = ?,
@@ -222,7 +232,7 @@ func (s *Store) StopRun(snapshot StatusSnapshot) error {
 		return err
 	}
 
-	_, err := s.db.Exec(`
+	err := s.execWrite(`
 		UPDATE sync_status
 		SET is_running = 0,
 		    project = ?,
@@ -247,31 +257,27 @@ func (s *Store) SaveProjects(projects []models.ProjectInfo) error {
 		return nil
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	stmt, err := tx.Prepare(`
-		INSERT INTO projects (service_name, project_name, source, last_seen_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(service_name, project_name)
-		DO UPDATE SET source = excluded.source, last_seen_at = excluded.last_seen_at
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, project := range projects {
-		if _, err := stmt.Exec(s.serviceName, project.Name, project.Source, now); err != nil {
+	return s.withWriteTx(func(tx *sql.Tx) error {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		stmt, err := tx.Prepare(`
+			INSERT INTO projects (service_name, project_name, source, last_seen_at)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(service_name, project_name)
+			DO UPDATE SET source = excluded.source, last_seen_at = excluded.last_seen_at
+		`)
+		if err != nil {
 			return err
 		}
-	}
+		defer stmt.Close()
 
-	return tx.Commit()
+		for _, project := range projects {
+			if _, err := stmt.Exec(s.serviceName, project.Name, project.Source, now); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 func (s *Store) LoadProjects() ([]models.ProjectInfo, error) {
@@ -303,16 +309,16 @@ func (s *Store) RecordCapture(obs CaptureObservation) (models.PersistedCaptureSt
 		return models.PersistedCaptureStatus{}, false, nil
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return models.PersistedCaptureStatus{}, false, err
-	}
-	defer tx.Rollback()
+	var (
+		resultStatus models.PersistedCaptureStatus
+		resultDone   bool
+	)
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	aggregateService := aggregateCaptureServiceName
+	err := s.withWriteTx(func(tx *sql.Tx) error {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		aggregateService := aggregateCaptureServiceName
 
-	_, err = tx.Exec(`
+		_, err := tx.Exec(`
 		INSERT INTO captures (
 			service_name, project_name, capture_number, is_test, data_type,
 			sensor_code, session_id, is_verified, last_seen_at
@@ -325,70 +331,70 @@ func (s *Store) RecordCapture(obs CaptureObservation) (models.PersistedCaptureSt
 			is_verified = excluded.is_verified,
 			last_seen_at = excluded.last_seen_at
 	`,
-		aggregateService,
-		obs.Project,
-		obs.Info.CaptureNumber,
-		boolToInt(obs.Info.IsTest),
-		obs.Info.DataType,
-		obs.Info.SensorCode,
-		obs.Info.SessionID,
-		boolToInt(obs.Info.IsVerified),
-		now,
-	)
-	if err != nil {
-		return models.PersistedCaptureStatus{}, false, err
-	}
+			aggregateService,
+			obs.Project,
+			obs.Info.CaptureNumber,
+			boolToInt(obs.Info.IsTest),
+			obs.Info.DataType,
+			obs.Info.SensorCode,
+			obs.Info.SessionID,
+			boolToInt(obs.Info.IsVerified),
+			now,
+		)
+		if err != nil {
+			return err
+		}
 
-	result, err := tx.Exec(`
+		result, err := tx.Exec(`
 		INSERT INTO capture_files (service_name, project_name, capture_number, file_key)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(service_name, project_name, capture_number, file_key) DO NOTHING
 	`, aggregateService, obs.Project, obs.Info.CaptureNumber, obs.FileKey)
-	if err != nil {
-		return models.PersistedCaptureStatus{}, false, err
-	}
+		if err != nil {
+			return err
+		}
 
-	inserted := false
-	if affected, err := result.RowsAffected(); err == nil {
-		inserted = affected > 0
-	}
+		inserted := false
+		if affected, err := result.RowsAffected(); err == nil {
+			inserted = affected > 0
+		}
 
-	rawCount, hasXML, hasDAT, alreadyCompleted, err := s.captureProgress(tx, obs.Project, obs.Info.CaptureNumber)
-	if err != nil {
-		return models.PersistedCaptureStatus{}, false, err
-	}
+		rawCount, hasXML, hasDAT, alreadyCompleted, err := s.captureProgress(tx, obs.Project, obs.Info.CaptureNumber)
+		if err != nil {
+			return err
+		}
 
-	completed := false
-	shouldComplete := rawCount == obs.RequiredRawFiles && (!obs.RequireXML || hasXML) && (!obs.RequireDAT || hasDAT)
-	if shouldComplete && !alreadyCompleted {
-		completed = inserted || !alreadyCompleted
-	}
+		completed := false
+		shouldComplete := rawCount == obs.RequiredRawFiles && (!obs.RequireXML || hasXML) && (!obs.RequireDAT || hasDAT)
+		if shouldComplete && !alreadyCompleted {
+			completed = inserted || !alreadyCompleted
+		}
 
-	completedAt := any(nil)
-	if completed {
-		completedAt = now
-	}
+		completedAt := any(nil)
+		if completed {
+			completedAt = now
+		}
 
-	_, err = tx.Exec(`
+		_, err = tx.Exec(`
 		UPDATE captures
 		SET raw_count = ?, has_xml = ?, has_dat = ?, completed = CASE WHEN ? THEN 1 ELSE completed END,
 		    completed_at = CASE WHEN ? THEN ? ELSE completed_at END,
 		    last_seen_at = ?
 		WHERE service_name = ? AND project_name = ? AND capture_number = ?
 	`, rawCount, boolToInt(hasXML), boolToInt(hasDAT), shouldComplete, completed, completedAt, now, aggregateService, obs.Project, obs.Info.CaptureNumber)
-	if err != nil {
-		return models.PersistedCaptureStatus{}, false, err
-	}
+		if err != nil {
+			return err
+		}
 
-	stats, err := s.persistedCaptureStatusTx(tx, obs.Project)
-	if err != nil {
-		return models.PersistedCaptureStatus{}, false, err
-	}
-	stats.RawCount = rawCount
-	stats.HasXML = hasXML
-	stats.HasDAT = hasDAT
+		stats, err := s.persistedCaptureStatusTx(tx, obs.Project)
+		if err != nil {
+			return err
+		}
+		stats.RawCount = rawCount
+		stats.HasXML = hasXML
+		stats.HasDAT = hasDAT
 
-	_, err = tx.Exec(`
+		_, err = tx.Exec(`
 		UPDATE sync_status
 		SET completed_captures = ?,
 		    completed_test_captures = ?,
@@ -397,15 +403,19 @@ func (s *Store) RecordCapture(obs CaptureObservation) (models.PersistedCaptureSt
 		    updated_at = ?
 		WHERE project = ?
 	`, stats.CompletedCaptures, stats.CompletedTestCaptures, stats.LastCaptureNumber, stats.LastTestCaptureNumber, now, obs.Project)
+		if err != nil {
+			return err
+		}
+
+		resultStatus = stats
+		resultDone = completed
+		return nil
+	})
 	if err != nil {
 		return models.PersistedCaptureStatus{}, false, err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return models.PersistedCaptureStatus{}, false, err
-	}
-
-	return stats, completed, nil
+	return resultStatus, resultDone, nil
 }
 
 func (s *Store) persistedCaptureStatusTx(tx *sql.Tx, project string) (models.PersistedCaptureStatus, error) {
@@ -507,6 +517,68 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func (s *Store) execWrite(query string, args ...any) error {
+	return s.withWriteTx(func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, args...)
+		return err
+	})
+}
+
+func (s *Store) withWriteTx(fn func(tx *sql.Tx) error) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	var lastErr error
+	for attempt := 0; attempt < busyRetryCount; attempt++ {
+		tx, err := s.db.Begin()
+		if err != nil {
+			if isSQLiteBusyError(err) {
+				lastErr = err
+				time.Sleep(time.Duration(attempt+1) * busyRetryDelay)
+				continue
+			}
+			return err
+		}
+
+		err = fn(tx)
+		if err != nil {
+			_ = tx.Rollback()
+			if isSQLiteBusyError(err) {
+				lastErr = err
+				time.Sleep(time.Duration(attempt+1) * busyRetryDelay)
+				continue
+			}
+			return err
+		}
+
+		if err := tx.Commit(); err != nil {
+			_ = tx.Rollback()
+			if isSQLiteBusyError(err) {
+				lastErr = err
+				time.Sleep(time.Duration(attempt+1) * busyRetryDelay)
+				continue
+			}
+			return err
+		}
+
+		return nil
+	}
+
+	if lastErr != nil {
+		return lastErr
+	}
+
+	return fmt.Errorf("sqlite write failed after retries")
+}
+
+func isSQLiteBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "sqlite_busy") || strings.Contains(message, "database is locked") || strings.Contains(message, "database table is locked")
 }
 
 func SortProjects(projects []models.ProjectInfo) {

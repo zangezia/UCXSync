@@ -2,6 +2,7 @@ package state
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/zangezia/UCXSync/pkg/models"
@@ -166,5 +167,74 @@ func TestStoreAggregatesCaptureAcrossServices(t *testing.T) {
 
 	if statusA.CompletedCaptures != 1 || statusB.CompletedCaptures != 1 {
 		t.Fatalf("expected shared completed capture count 1, got A=%d B=%d", statusA.CompletedCaptures, statusB.CompletedCaptures)
+	}
+}
+
+func TestStoreConcurrentWritesSharedDatabase(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "shared-state.db")
+	storeA := newNamedTestStore(t, path, "ucxsync@a")
+	storeB := newNamedTestStore(t, path, "ucxsync@b")
+
+	if _, err := storeA.StartRun("ProjBusy", "/ucdata", 4); err != nil {
+		t.Fatalf("storeA StartRun returned error: %v", err)
+	}
+	if _, err := storeB.StartRun("ProjBusy", "/ucdata", 4); err != nil {
+		t.Fatalf("storeB StartRun returned error: %v", err)
+	}
+
+	steps := []struct {
+		store   *Store
+		fileKey string
+		sensor  string
+	}{
+		{store: storeA, fileKey: "raw:00-00", sensor: "00-00"},
+		{store: storeB, fileKey: "raw:00-01", sensor: "00-01"},
+		{store: storeA, fileKey: "xml:CU"},
+		{store: storeB, fileKey: "dat:CU"},
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, len(steps))
+	for _, step := range steps {
+		step := step
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, err := step.store.RecordCapture(CaptureObservation{
+				Project: "ProjBusy",
+				Info: models.CaptureInfo{
+					DataType:      "Lvl00",
+					CaptureNumber: "00077",
+					ProjectName:   "ProjBusy",
+					SensorCode:    step.sensor,
+					SessionID:     "BUSY_TEST",
+					IsVerified:    true,
+				},
+				FileKey:          step.fileKey,
+				RequiredRawFiles: 2,
+				RequireXML:       true,
+				RequireDAT:       true,
+			})
+			errs <- err
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent RecordCapture returned error: %v", err)
+		}
+	}
+
+	statusA, err := storeA.LoadStatus()
+	if err != nil {
+		t.Fatalf("storeA LoadStatus returned error: %v", err)
+	}
+	if statusA.CompletedCaptures != 1 {
+		t.Fatalf("expected completed capture count 1 after concurrent writes, got %d", statusA.CompletedCaptures)
 	}
 }
