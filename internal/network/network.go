@@ -24,6 +24,12 @@ type Service struct {
 	mounted map[string]bool // track mounted shares
 }
 
+type MountStatus struct {
+	Mounted int
+	Total   int
+	Missing []string
+}
+
 // New creates a new network service
 func New(nodes, shares []string, username, password string) *Service {
 	return &Service{
@@ -164,6 +170,35 @@ func (s *Service) UnmountAll() error {
 func (s *Service) GetMountPoint(node, share string) string {
 	shareName := strings.TrimSuffix(share, "$")
 	return filepath.Join(s.baseMountDir, node, shareName)
+}
+
+func (s *Service) GetMountStatus() MountStatus {
+	s.mu.Lock()
+	nodes := append([]string(nil), s.nodes...)
+	shares := append([]string(nil), s.shares...)
+	baseMountDir := s.baseMountDir
+	s.mu.Unlock()
+
+	status := MountStatus{Total: len(nodes) * len(shares)}
+	if status.Total == 0 {
+		return status
+	}
+
+	missing := make([]string, 0)
+	for _, node := range nodes {
+		for _, share := range shares {
+			shareName := strings.TrimSuffix(share, "$")
+			mountPoint := filepath.Join(baseMountDir, node, shareName)
+			if s.isMounted(mountPoint) {
+				status.Mounted++
+				continue
+			}
+			missing = append(missing, fmt.Sprintf("%s/%s", node, share))
+		}
+	}
+
+	status.Missing = missing
+	return status
 }
 
 func (s *Service) mountShare(uncPath, mountPoint, credFile string) error {

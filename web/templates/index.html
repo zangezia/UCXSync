@@ -3,189 +3,326 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UCXSync - Синхронизация файлов</title>
+    <title>UCXSync - COS Inspired Console</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body>
-    <div class="container">
-        <header>
-            <h1>🔄 UCXSync</h1>
-            <p class="subtitle">Синхронизация файлов UCX проектов</p>
+<body class="cos-theme">
+    <div class="container console-shell">
+        <header class="console-topbar">
+            <div class="brand-block">
+                <div class="brand-kicker">UCXSync / COS-style</div>
+                <h1>Camera Operation Dashboard</h1>
+                <p class="subtitle">Синхронизация UCX-проектов в визуальном стиле операторской консоли</p>
+            </div>
+
+            <div class="status-cluster" aria-label="console status">
+                <div class="status-chip lamp-cluster">
+                    <span class="status-chip-label">status</span>
+                    <div class="status-lamps" aria-hidden="true">
+                        <span class="lamp lamp-green"></span>
+                        <span class="lamp lamp-green"></span>
+                        <span class="lamp lamp-amber"></span>
+                    </div>
+                </div>
+                <div class="status-chip">
+                    <span class="status-chip-label">mode</span>
+                    <strong>operator</strong>
+                </div>
+                <div class="status-chip accent">
+                    <span class="status-chip-label">ui ports</span>
+                    <strong>8080 / 8081</strong>
+                </div>
+                <div class="status-chip counter">
+                    <span class="status-chip-label">profile</span>
+                    <strong>UCX</strong>
+                </div>
+            </div>
         </header>
 
-        <main>
-            <!-- Control Panel -->
-            <section class="control-panel">
-                <div class="form-group">
-                    <label for="project">Проект:</label>
-                    <div class="input-group">
-                        <select id="project" class="form-control">
-                            <option value="">-- Выберите проект --</option>
-                        </select>
-                        <button id="refresh-projects" class="btn btn-secondary">🔄 Обновить</button>
+        <div class="console-frame">
+            <aside class="softkey-rail left" aria-hidden="true">
+                <div class="softkey-title">Main menus</div>
+                <div class="softkey" data-icon="📋">Prepare</div>
+                <div class="softkey active" data-icon="⏺">Record</div>
+                <div class="softkey" data-icon="🖼">View</div>
+                <div class="softkey" data-icon="⚙">Explore</div>
+                <div class="softkey" data-icon="🗄">Storage</div>
+                <div class="softkey" data-icon="🔧">Settings</div>
+            </aside>
+
+            <main class="work-area">
+                <section class="cos-status-strip" aria-hidden="true">
+                    <div class="strip-label">Welcome</div>
+                    <div class="strip-bootbar">
+                        <span></span><span></span><span></span><span></span><span></span><span></span>
+                        <span></span><span></span><span></span><span></span><span></span><span></span>
                     </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="destination">Папка назначения:</label>
-                    <div class="input-group">
-                        <select id="destination" class="form-control">
-                            <option value="">-- Выберите диск --</option>
-                        </select>
-                        <button id="manage-devices-btn" class="btn btn-secondary">💾 Управление дисками</button>
-                        <input type="text" id="destination-custom" class="form-control" placeholder="Или введите путь вручную" style="margin-left: 10px;">
+                    <div class="strip-icons">
+                        <span class="strip-indicator on"></span>
+                        <span class="strip-indicator on"></span>
+                        <span class="strip-indicator warn"></span>
                     </div>
-                </div>
+                    <div class="strip-counter">6554</div>
+                </section>
 
-                <div class="form-group">
-                    <label for="parallelism">Параллельных потоков:</label>
-                    <input type="number" id="parallelism" class="form-control" value="8" min="1" max="32">
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="force-full-resync">
-                        Перекачать полностью (игнорировать отметки о ранее скачанных файлах)
-                    </label>
-                </div>
-
-                <div class="button-group">
-                    <button id="start-btn" class="btn btn-primary">▶️ Запустить</button>
-                    <button id="stop-btn" class="btn btn-danger" disabled>⏹️ Остановить</button>
-                    <button id="mount-shares-btn" class="btn btn-secondary">🔁 Смонтировать шары</button>
-                    <button id="restart-service-btn" class="btn btn-secondary">♻️ Перезапустить службу</button>
-                </div>
-            </section>
-
-            <!-- Status Panel -->
-            <section class="status-panel">
-                <div class="status-grid">
-                    <div class="status-card">
-                        <div class="status-label">Снимков скачано</div>
-                        <div class="status-value" id="completed-captures">0</div>
+                <section class="hero-panel">
+                    <div class="hero-copy">
+                        <div class="hero-tag">Operator workspace</div>
+                        <h2>UCXSync control surface</h2>
+                        <p>
+                            Один экран для запуска синхронизации, мониторинга хоста и контроля инстансов —
+                            со спокойной типографикой, светлой рабочей зоной и визуальным языком COS.
+                        </p>
                     </div>
-                    <div class="status-card">
-                        <div class="status-label">Последний снимок</div>
-                        <div class="status-value" id="last-capture">-</div>
-                    </div>
-                    <div class="status-card">
-                        <div class="status-label">Тестовых снимков</div>
-                        <div class="status-value" id="test-captures">0</div>
-                    </div>
-                    <div class="status-card">
-                        <div class="status-label">Активных копирований</div>
-                        <div class="status-value" id="active-ops"><span id="active-ops-count">0</span> / <span id="max-parallelism">8</span></div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="instances-panel" id="instances-panel" hidden>
-                <h2>Инстансы UCXSync</h2>
-                <div class="instances-grid" id="instances-grid"></div>
-            </section>
-
-            <!-- Performance Metrics -->
-            <section class="metrics-panel">
-                <h2 id="metrics-title">Производительность</h2>
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-label">CPU</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="cpu-progress"></div>
+                    <div class="hero-meta cos-preview-card">
+                        <div class="cos-preview-header">
+                            <span>Record</span>
+                            <span class="cos-preview-display">n/a</span>
                         </div>
-                        <div class="metric-value" id="cpu-value">0%</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">Память</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="memory-progress"></div>
+                        <div class="cos-preview-body">
+                            <div class="cos-preview-menu">
+                                <span>Prepare</span>
+                                <span class="active">Record</span>
+                                <span>View</span>
+                                <span>Explore</span>
+                                <span>Storage</span>
+                                <span>Settings</span>
+                            </div>
+                            <div class="cos-preview-grid" aria-hidden="true">
+                                <span></span><span></span><span></span>
+                                <span></span><span></span><span></span>
+                                <span></span><span></span><span></span>
+                            </div>
                         </div>
-                        <div class="metric-value" id="memory-value">0 GB / 0 GB</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">Диск</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="disk-progress"></div>
+                        <div class="cos-preview-footer">
+                            <span>softkeys active</span>
+                            <span>console layout</span>
                         </div>
-                        <div class="metric-value" id="disk-value">0 MB/s</div>
                     </div>
+                </section>
 
-                    <div class="metric-card">
-                        <div class="metric-label">Сеть (суммарно)</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="network-progress"></div>
+                <section class="control-panel workspace-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <div class="panel-kicker">Record area</div>
+                            <h2>Параметры синхронизации</h2>
                         </div>
-                        <div class="metric-value" id="network-value">0 MB/s</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label" id="network-primary-label">Сеть #1</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="network-primary-progress"></div>
+                        <div class="tab-strip" aria-hidden="true">
+                            <span class="tab active">General</span>
+                            <span class="tab">Record</span>
+                            <span class="tab">Storage</span>
+                            <span class="tab">Local</span>
                         </div>
-                        <div class="metric-value" id="network-primary-value">Нет данных</div>
                     </div>
 
-                    <div class="metric-card">
-                        <div class="metric-label" id="network-secondary-label">Сеть #2</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="network-secondary-progress"></div>
+                    <div class="form-group">
+                        <label for="project">Проект:</label>
+                        <div class="input-group">
+                            <select id="project" class="form-control">
+                                <option value="">-- Выберите проект --</option>
+                            </select>
+                            <button id="refresh-projects" class="btn btn-secondary">🔄 Обновить</button>
                         </div>
-                        <div class="metric-value" id="network-secondary-value">Нет данных</div>
                     </div>
 
-                    <div class="metric-card">
-                        <div class="metric-label">Температура CPU</div>
-                        <div class="metric-value large" id="cpu-temperature-value">—</div>
+                    <div class="form-group">
+                        <label for="destination">Папка назначения:</label>
+                        <div class="input-group">
+                            <select id="destination" class="form-control">
+                                <option value="">-- Выберите диск --</option>
+                            </select>
+                            <button id="manage-devices-btn" class="btn btn-secondary">💾 Управление дисками</button>
+                            <input type="text" id="destination-custom" class="form-control" placeholder="Или введите путь вручную">
+                        </div>
                     </div>
 
-                    <div class="metric-card">
-                        <div class="metric-label">Свободно на диске</div>
-                        <div class="metric-value large" id="free-disk">0 GB</div>
+                    <div class="form-group">
+                        <label for="parallelism">Параллельных потоков:</label>
+                        <input type="number" id="parallelism" class="form-control" value="8" min="1" max="32">
                     </div>
-                </div>
-            </section>
 
-            <!-- Activity Table -->
-            <section class="activity-panel">
-                <h2>Активность по узлам</h2>
-                <div class="table-container">
-                    <table id="activity-table">
-                        <thead>
-                            <tr>
-                                <th>Инстанс</th>
-                                <th>Узел</th>
-                                <th>Шара</th>
-                                <th>Статус</th>
-                                <th>Файлов скачано</th>
-                                <th>Прогресс</th>
-                                <th>Обновлено</th>
-                            </tr>
-                        </thead>
-                        <tbody id="activity-body">
-                            <tr>
-                                <td colspan="7" class="no-data">Нет активных задач</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
+                    <div class="form-group checkbox-row">
+                        <label>
+                            <input type="checkbox" id="force-full-resync">
+                            Перекачать полностью (игнорировать отметки о ранее скачанных файлах)
+                        </label>
+                    </div>
 
-            <!-- Log Panel -->
-            <section class="log-panel">
-                <h2>Журнал событий</h2>
-                <div id="log-container" class="log-container"></div>
-            </section>
-        </main>
+                    <div class="button-group">
+                        <button id="start-btn" class="btn btn-primary">▶️ Запустить</button>
+                        <button id="stop-btn" class="btn btn-danger" disabled>⏹️ Остановить</button>
+                        <button id="mount-shares-btn" class="btn btn-secondary">🔁 Смонтировать шары</button>
+                        <button id="restart-service-btn" class="btn btn-secondary">♻️ Перезапустить службу</button>
+                    </div>
+                </section>
 
-        <footer>
+                <section class="warning-panel workspace-panel" id="share-warning-panel" hidden>
+                    <div class="warning-banner" id="share-warning-message"></div>
+                </section>
+
+                <section class="status-panel workspace-panel">
+                    <div class="panel-heading compact">
+                        <div>
+                            <div class="panel-kicker">Status overview</div>
+                            <h2>Сводка выполнения</h2>
+                        </div>
+                    </div>
+
+                    <div class="status-grid">
+                        <div class="status-card">
+                            <div class="status-label">Снимков скачано</div>
+                            <div class="status-value" id="completed-captures">0</div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-label">Последний снимок</div>
+                            <div class="status-value" id="last-capture">-</div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-label">Тестовых снимков</div>
+                            <div class="status-value" id="test-captures">0</div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-label">Активных копирований</div>
+                            <div class="status-value" id="active-ops"><span id="active-ops-count">0</span> / <span id="max-parallelism">8</span></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="instances-panel workspace-panel" id="instances-panel" hidden>
+                    <div class="panel-heading compact">
+                        <div>
+                            <div class="panel-kicker">Multi-instance</div>
+                            <h2>Инстансы UCXSync</h2>
+                        </div>
+                    </div>
+                    <div class="instances-grid" id="instances-grid"></div>
+                </section>
+
+                <section class="metrics-panel workspace-panel">
+                    <div class="panel-heading compact">
+                        <div>
+                            <div class="panel-kicker">Host telemetry</div>
+                            <h2 id="metrics-title">Производительность</h2>
+                        </div>
+                    </div>
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-label">CPU</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="cpu-progress"></div>
+                            </div>
+                            <div class="metric-value" id="cpu-value">0%</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Память</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="memory-progress"></div>
+                            </div>
+                            <div class="metric-value" id="memory-value">0 GB / 0 GB</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Диск</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="disk-progress"></div>
+                            </div>
+                            <div class="metric-value" id="disk-value">0 MB/s</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Сеть (суммарно)</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="network-progress"></div>
+                            </div>
+                            <div class="metric-value" id="network-value">0 MB/s</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label" id="network-primary-label">Сеть #1</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="network-primary-progress"></div>
+                            </div>
+                            <div class="metric-value" id="network-primary-value">Нет данных</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label" id="network-secondary-label">Сеть #2</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="network-secondary-progress"></div>
+                            </div>
+                            <div class="metric-value" id="network-secondary-value">Нет данных</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Температура CPU</div>
+                            <div class="metric-value large" id="cpu-temperature-value">—</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Свободно на диске</div>
+                            <div class="metric-value large" id="free-disk">0 GB</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="activity-panel workspace-panel">
+                    <div class="panel-heading compact">
+                        <div>
+                            <div class="panel-kicker">Work area</div>
+                            <h2>Активность по узлам</h2>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table id="activity-table">
+                            <thead>
+                                <tr>
+                                    <th>Инстанс</th>
+                                    <th>Узел</th>
+                                    <th>Шара</th>
+                                    <th>Статус</th>
+                                    <th>Файлов скачано</th>
+                                    <th>Прогресс</th>
+                                    <th>Обновлено</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activity-body">
+                                <tr>
+                                    <td colspan="7" class="no-data">Нет активных задач</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="log-panel workspace-panel">
+                    <div class="panel-heading compact">
+                        <div>
+                            <div class="panel-kicker">Event stream</div>
+                            <h2>Журнал событий</h2>
+                        </div>
+                    </div>
+                    <div id="log-container" class="log-container"></div>
+                </section>
+            </main>
+
+            <aside class="softkey-rail right" aria-hidden="true">
+                <div class="softkey-title">Softkeys</div>
+                <div class="softkey" data-icon="⇪">Mount</div>
+                <div class="softkey" data-icon="↻">Restart</div>
+                <div class="softkey" data-icon="▶">Sync</div>
+                <div class="softkey" data-icon="▥">Metrics</div>
+                <div class="softkey" data-icon="≡">Logs</div>
+                <div class="softkey" data-icon="⌕">Inspect</div>
+            </aside>
+        </div>
+
+        <footer class="console-footer">
             <p>UCXSync v1.0.0 | <span id="connection-status">🔴 Отключено</span></p>
+            <p class="footer-note">COS-inspired layout for operators: calm, high-contrast, no glitter bombs.</p>
         </footer>
     </div>
 
-    <!-- Device Management Modal -->
     <div id="device-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">

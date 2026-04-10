@@ -34,6 +34,11 @@ type SyncStatus struct {
 	Destination           string     `json:"destination"`
 	MaxParallelism        int        `json:"max_parallelism"`        // Configured limit
 	ActiveFileOperations  int        `json:"active_file_operations"` // Current active file copies
+	MountedShares         int        `json:"mounted_shares"`
+	TotalShares           int        `json:"total_shares"`
+	HasMissingShares      bool       `json:"has_missing_shares"`
+	MissingShares         []string   `json:"missing_shares"`
+	ShareWarning          string     `json:"share_warning"`
 	CompletedCaptures     int        `json:"completed_captures"`
 	CompletedTestCaptures int        `json:"completed_test_captures"`
 	LastCaptureNumber     string     `json:"last_capture_number"`
