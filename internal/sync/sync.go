@@ -362,6 +362,33 @@ func (s *Service) GetStatus() models.SyncStatus {
 	return status
 }
 
+// UnavailableShare describes a single inaccessible mount point.
+type UnavailableShare struct {
+	Node  string
+	Share string
+	Path  string
+}
+
+// CheckSharesAvailability returns a list of node/share pairs whose mount
+// points cannot be stat'd. An empty slice means all shares are reachable.
+func (s *Service) CheckSharesAvailability() []UnavailableShare {
+	var unavailable []UnavailableShare
+	for _, node := range s.nodes {
+		for _, share := range s.shares {
+			shareName := strings.TrimSuffix(share, "$")
+			mountPoint := filepath.Join(s.baseMountDir, node, shareName)
+			if _, err := os.Stat(mountPoint); err != nil {
+				unavailable = append(unavailable, UnavailableShare{
+					Node:  node,
+					Share: share,
+					Path:  mountPoint,
+				})
+			}
+		}
+	}
+	return unavailable
+}
+
 // FindProjects scans network for available projects
 func (s *Service) FindProjects(ctx context.Context) ([]models.ProjectInfo, error) {
 	projectMap := make(map[string]string) // name -> source

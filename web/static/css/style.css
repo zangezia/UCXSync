@@ -35,8 +35,8 @@ header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 30px;
-    padding: 20px;
+    margin-bottom: 15px;
+    padding: 10px 12px;
     background: var(--card-bg);
     border-radius: 8px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
@@ -48,9 +48,9 @@ header {
 }
 
 header h1 {
-    font-size: 2.5rem;
+    font-size: 1.9rem;
     color: var(--primary-color);
-    margin-bottom: 5px;
+    margin-bottom: 4px;
 }
 
 .subtitle {
@@ -135,6 +135,7 @@ h2 {
 .control-counters .status-card {
     padding: 10px 14px;
     text-align: left;
+    min-height: 72px;
 }
 
 .control-counters .status-value {
@@ -158,7 +159,7 @@ h2 {
 .control-buttons .btn {
     width: 100%;
     text-align: center;
-    padding: 16px 16px;
+    padding: 10px 16px;
     font-size: 15px;
     min-height: 72px;
     display: inline-flex;

@@ -308,6 +308,18 @@ func (s *Server) handleStartSync(w http.ResponseWriter, r *http.Request) {
 	// Set target disk for monitoring
 	s.monService.SetTargetDisk(req.Destination)
 
+	// Check that all shares are mounted and accessible
+	if unavailable := s.syncService.CheckSharesAvailability(); len(unavailable) > 0 {
+		var missing []string
+		for _, u := range unavailable {
+			missing = append(missing, fmt.Sprintf("%s/%s (%s)", u.Node, u.Share, u.Path))
+		}
+		msg := fmt.Sprintf("Cannot start sync: %d share(s) unavailable: %s", len(missing), strings.Join(missing, "; "))
+		log.Warn().Strs("unavailable", missing).Msg("Shares not available, sync blocked")
+		http.Error(w, msg, http.StatusServiceUnavailable)
+		return
+	}
+
 	// Start sync
 	ctx := context.Background()
 	if err := s.syncService.Start(ctx, req.Project, req.Destination, req.MaxParallelism, req.ForceFullResync); err != nil {

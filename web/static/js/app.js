@@ -300,7 +300,7 @@ class UCXSyncApp {
         projects.forEach(project => {
             const option = document.createElement('option');
             option.value = project.name;
-            option.textContent = project.source ? `${project.name} (${project.source})` : project.name;
+            option.textContent = project.name;
             this.projectSelect.appendChild(option);
         });
 
