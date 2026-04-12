@@ -141,8 +141,11 @@ class UCXSyncApp {
             }
         });
 
-        // Auto-save settings
-        this.projectSelect.addEventListener('change', () => this.saveSettings());
+        // Auto-save settings and refresh stats on project change
+        this.projectSelect.addEventListener('change', () => {
+            this.saveSettings();
+            if (!this.isRunning) this.loadProjectStats();
+        });
         this.destinationSelect.addEventListener('change', () => this.saveSettings());
         this.parallelismInput.addEventListener('change', () => this.saveSettings());
         this.forceFullResyncCheckbox?.addEventListener('change', () => this.saveSettings());
@@ -375,6 +378,11 @@ class UCXSyncApp {
 
             this.isRunning = true;
             this.updateControlsState();
+            if (forceFullResync) {
+                this.completedCapturesEl.textContent = 0;
+                this.testCapturesEl.textContent = 0;
+                this.lastCaptureEl.textContent = '-';
+            }
             this.log(`✓ Синхронизация проекта '${project}' запущена`, 'success');
         } catch (error) {
             this.log(`✗ Ошибка запуска: ${error.message}`, 'error');
@@ -406,6 +414,11 @@ class UCXSyncApp {
             });
 
             this.logDashboardActionResults('Запуск синхронизации', response.results);
+            if (forceFullResync) {
+                this.completedCapturesEl.textContent = 0;
+                this.testCapturesEl.textContent = 0;
+                this.lastCaptureEl.textContent = '-';
+            }
             await this.refreshDashboardOverview();
         } catch (error) {
             this.log(`✗ Ошибка запуска общего дашборда: ${error.message}`, 'error');
@@ -522,12 +535,35 @@ class UCXSyncApp {
         }
     }
 
+    async loadProjectStats() {
+        const project = this.projectSelect.value;
+        if (!project) {
+            this.completedCapturesEl.textContent = 0;
+            this.testCapturesEl.textContent = 0;
+            this.lastCaptureEl.textContent = '-';
+            return;
+        }
+        try {
+            const endpoint = this.mode === 'dashboard'
+                ? `/api/dashboard/project-stats?project=${encodeURIComponent(project)}`
+                : `/api/project-stats?project=${encodeURIComponent(project)}`;
+            const stats = await this.fetchJSON(endpoint);
+            this.completedCapturesEl.textContent = stats.completed_captures || 0;
+            this.testCapturesEl.textContent = stats.completed_test_captures || 0;
+            this.lastCaptureEl.textContent = stats.last_capture_number || '-';
+        } catch (e) { /* ignore */ }
+    }
+
     updateSingleStatus(status) {
         this.isRunning = status.is_running;
         this.updateControlsState();
-        this.completedCapturesEl.textContent = status.completed_captures || 0;
-        this.lastCaptureEl.textContent = status.last_capture_number || '-';
-        this.testCapturesEl.textContent = status.completed_test_captures || 0;
+        // Only overwrite counters from WebSocket when sync is running with the selected project
+        const selectedProject = this.projectSelect.value;
+        if (status.is_running || !selectedProject || status.project === selectedProject) {
+            this.completedCapturesEl.textContent = status.completed_captures || 0;
+            this.lastCaptureEl.textContent = status.last_capture_number || '-';
+            this.testCapturesEl.textContent = status.completed_test_captures || 0;
+        }
         this.activeOpsCountEl.textContent = status.active_file_operations || 0;
         this.maxParallelismEl.textContent = status.max_parallelism || 8;
         this.updateActiveOpsColor(status.active_file_operations || 0, status.max_parallelism || 0);

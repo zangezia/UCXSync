@@ -213,8 +213,9 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 		return err
 	}
 
-	// Create destination directory
-	destDir := filepath.Join(destination, project)
+	// Create destination directory: <destination>/<YYYY-MM-DD>/<project>
+	dateDir := time.Now().Format("2006-01-02")
+	destDir := filepath.Join(destination, dateDir, project)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		s.isRunning = false
 		return fmt.Errorf("failed to create destination: %w", err)

@@ -163,9 +163,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/shares/mount", s.handleMountShares)
 	mux.HandleFunc("/api/service/restart", s.handleRestartService)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
+	mux.HandleFunc("/api/project-stats", s.handleGetProjectStats)
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("/api/sync/start", s.handleStartSync)
 	mux.HandleFunc("/api/sync/stop", s.handleStopSync)
+	mux.HandleFunc("/api/dashboard/project-stats", s.handleDashboardProjectStats)
 	mux.HandleFunc("/api/dashboard/config", s.handleDashboardConfig)
 	mux.HandleFunc("/api/dashboard/overview", s.handleDashboardOverview)
 	mux.HandleFunc("/api/dashboard/projects", s.handleDashboardProjects)
@@ -264,6 +266,75 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+func (s *Server) handleGetProjectStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		http.Error(w, "project parameter required", http.StatusBadRequest)
+		return
+	}
+
+	type projectStats struct {
+		Project               string `json:"project"`
+		CompletedCaptures     int    `json:"completed_captures"`
+		CompletedTestCaptures int    `json:"completed_test_captures"`
+		LastCaptureNumber     string `json:"last_capture_number"`
+		LastTestCaptureNumber string `json:"last_test_capture_number"`
+	}
+
+	stats := projectStats{Project: project}
+	if s.stateStore != nil {
+		if ps, err := s.stateStore.LoadProjectStatus(project); err == nil {
+			stats.CompletedCaptures = ps.CompletedCaptures
+			stats.CompletedTestCaptures = ps.CompletedTestCaptures
+			stats.LastCaptureNumber = ps.LastCaptureNumber
+			stats.LastTestCaptureNumber = ps.LastTestCaptureNumber
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (s *Server) handleDashboardProjectStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		http.Error(w, "project parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Use local stateStore if available (dashboard aggregator has its own DB)
+	type projectStats struct {
+		Project               string `json:"project"`
+		CompletedCaptures     int    `json:"completed_captures"`
+		CompletedTestCaptures int    `json:"completed_test_captures"`
+		LastCaptureNumber     string `json:"last_capture_number"`
+		LastTestCaptureNumber string `json:"last_test_capture_number"`
+	}
+
+	stats := projectStats{Project: project}
+	if s.stateStore != nil {
+		if ps, err := s.stateStore.LoadProjectStatus(project); err == nil {
+			stats.CompletedCaptures = ps.CompletedCaptures
+			stats.CompletedTestCaptures = ps.CompletedTestCaptures
+			stats.LastCaptureNumber = ps.LastCaptureNumber
+			stats.LastTestCaptureNumber = ps.LastTestCaptureNumber
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 func (s *Server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
