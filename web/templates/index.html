@@ -3,78 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UCXSync - Синхронизация файлов</title>
+    <title>UltraCam Downloader</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🔄 UCXSync</h1>
-            <p class="subtitle">Синхронизация файлов UCX проектов</p>
+            <div class="header-left">
+                <h1>🔄 UltraCam Downloader</h1>
+                <p class="subtitle">Dashboard (Single)</p>
+            </div>
+            <div class="service-indicators" id="service-indicators">
+                <div class="service-indicator" id="indicator-single">
+                    <span class="indicator-dot" id="indicator-single-dot"></span>
+                    <span class="indicator-label">Service</span>
+                </div>
+            </div>
         </header>
 
         <main>
             <!-- Control Panel -->
             <section class="control-panel">
-                <div class="form-group">
-                    <label for="project">Проект:</label>
-                    <div class="input-group">
-                        <select id="project" class="form-control">
-                            <option value="">-- Выберите проект --</option>
-                        </select>
-                        <button id="refresh-projects" class="btn btn-secondary">🔄 Обновить</button>
+                <div class="control-layout">
+                    <!-- Left: counters -->
+                    <div class="control-counters">
+                        <div class="status-card">
+                            <div class="status-label">Снимков скачано</div>
+                            <div class="status-value" id="completed-captures">0</div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-label">Последний снимок</div>
+                            <div class="status-value" id="last-capture">-</div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-label">Тестовых снимков</div>
+                            <div class="status-value" id="test-captures">0</div>
+                        </div>
+                        <div class="status-card">
+                            <div class="status-label">Активных копирований</div>
+                            <div class="status-value" id="active-ops"><span id="active-ops-count">0</span> / <span id="max-parallelism">8</span></div>
+                        </div>
                     </div>
-                </div>
 
-                <div class="form-group">
-                    <label for="destination">Папка назначения:</label>
-                    <div class="input-group">
-                        <select id="destination" class="form-control">
-                            <option value="">-- Выберите диск --</option>
-                        </select>
-                        <button id="manage-devices-btn" class="btn btn-secondary">💾 Управление дисками</button>
-                        <input type="text" id="destination-custom" class="form-control" placeholder="Или введите путь вручную" style="margin-left: 10px;">
+                    <!-- Center: form fields -->
+                    <div class="control-fields">
+                        <div class="form-group">
+                            <label for="project">Проект:</label>
+                            <div class="input-group">
+                                <select id="project" class="form-control">
+                                    <option value="">-- Выберите проект --</option>
+                                </select>
+                                <button id="refresh-projects" class="btn btn-secondary">🔄 Обновить</button>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="destination">Папка назначения:</label>
+                            <div class="input-group">
+                                <select id="destination" class="form-control">
+                                    <option value="">-- Выберите диск --</option>
+                                </select>
+                                <button id="manage-devices-btn" class="btn btn-secondary">💾 Управление дисками</button>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="parallelism">Параллельных потоков:</label>
+                            <input type="number" id="parallelism" class="form-control" value="8" min="1" max="32">
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="force-full-resync">
+                                Перекачать полностью (игнорировать отметки о ранее скачанных файлах)
+                            </label>
+                        </div>
                     </div>
-                </div>
 
-                <div class="form-group">
-                    <label for="parallelism">Параллельных потоков:</label>
-                    <input type="number" id="parallelism" class="form-control" value="8" min="1" max="32">
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="force-full-resync">
-                        Перекачать полностью (игнорировать отметки о ранее скачанных файлах)
-                    </label>
-                </div>
-
-                <div class="button-group">
-                    <button id="start-btn" class="btn btn-primary">▶️ Запустить</button>
-                    <button id="stop-btn" class="btn btn-danger" disabled>⏹️ Остановить</button>
-                    <button id="mount-shares-btn" class="btn btn-secondary">🔁 Смонтировать шары</button>
-                    <button id="restart-service-btn" class="btn btn-secondary">♻️ Перезапустить службу</button>
-                </div>
-            </section>
-
-            <!-- Status Panel -->
-            <section class="status-panel">
-                <div class="status-grid">
-                    <div class="status-card">
-                        <div class="status-label">Снимков скачано</div>
-                        <div class="status-value" id="completed-captures">0</div>
-                    </div>
-                    <div class="status-card">
-                        <div class="status-label">Последний снимок</div>
-                        <div class="status-value" id="last-capture">-</div>
-                    </div>
-                    <div class="status-card">
-                        <div class="status-label">Тестовых снимков</div>
-                        <div class="status-value" id="test-captures">0</div>
-                    </div>
-                    <div class="status-card">
-                        <div class="status-label">Активных копирований</div>
-                        <div class="status-value" id="active-ops"><span id="active-ops-count">0</span> / <span id="max-parallelism">8</span></div>
+                    <!-- Right: action buttons -->
+                    <div class="control-buttons">
+                        <button id="start-btn" class="btn btn-primary">▶️ Запустить</button>
+                        <button id="stop-btn" class="btn btn-danger" disabled>⏹️ Остановить</button>
+                        <button id="mount-shares-btn" class="btn btn-secondary">🔁 Смонтировать шары</button>
+                        <button id="restart-service-btn" class="btn btn-secondary">♻️ Перезапустить службу</button>
                     </div>
                 </div>
             </section>

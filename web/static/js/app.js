@@ -44,7 +44,7 @@ class UCXSyncApp {
         // Controls
         this.projectSelect = document.getElementById('project');
         this.destinationSelect = document.getElementById('destination');
-        this.destinationCustom = document.getElementById('destination-custom');
+        this.destinationCustom = { value: '' }; // removed from UI
         this.parallelismInput = document.getElementById('parallelism');
         this.forceFullResyncCheckbox = document.getElementById('force-full-resync');
         this.startBtn = document.getElementById('start-btn');
@@ -91,6 +91,9 @@ class UCXSyncApp {
         // Device modal
         this.deviceModal = document.getElementById('device-modal');
         this.devicesBody = document.getElementById('devices-body');
+
+        // Service indicators
+        this.serviceIndicators = document.getElementById('service-indicators');
     }
 
     initEventListeners() {
@@ -141,7 +144,6 @@ class UCXSyncApp {
         // Auto-save settings
         this.projectSelect.addEventListener('change', () => this.saveSettings());
         this.destinationSelect.addEventListener('change', () => this.saveSettings());
-        this.destinationCustom.addEventListener('change', () => this.saveSettings());
         this.parallelismInput.addEventListener('change', () => this.saveSettings());
         this.forceFullResyncCheckbox?.addEventListener('change', () => this.saveSettings());
     }
@@ -164,12 +166,19 @@ class UCXSyncApp {
     }
 
     enableDashboardMode() {
-        this.subtitleEl.textContent = 'Общий дашборд для двух инстансов UCXSync';
+        this.subtitleEl.textContent = 'Dashboard (Dual)';
         this.metricsTitle.textContent = 'Производительность хоста';
-        this.startBtn.textContent = '▶️ Запустить оба';
-        this.stopBtn.textContent = '⏹️ Остановить оба';
-        this.mountSharesBtn.textContent = '🔁 Смонтировать шары на обоих';
-        this.restartServiceBtn.textContent = '♻️ Перезапустить оба сервиса';
+        this.startBtn.textContent = '▶️ Запустить';
+        this.stopBtn.textContent = '⏹️ Остановить';
+        this.mountSharesBtn.textContent = '🔁 Смонтировать DU';
+        this.restartServiceBtn.textContent = '♻️ Перезапустить';
+        // Replace single indicator with two per-instance indicators
+        this.serviceIndicators.innerHTML = this.dashboardConfig.instances.map(inst =>
+            `<div class="service-indicator" id="indicator-${inst.id}">
+                <span class="indicator-dot" id="indicator-${inst.id}-dot"></span>
+                <span class="indicator-label">${this.escapeHtml(inst.name)}</span>
+            </div>`
+        ).join('');
         this.log('Общий дашборд включен', 'info');
     }
 
@@ -229,7 +238,17 @@ class UCXSyncApp {
         } else {
             this.connectionStatus.textContent = '🔴 Отключено';
             this.connectionStatus.style.color = 'var(--danger-color)';
+            // In single mode mark service red when disconnected
+            if (this.mode !== 'dashboard') {
+                this.setIndicatorState('indicator-single-dot', 'red');
+            }
         }
+    }
+
+    setIndicatorState(dotId, state) {
+        const dot = document.getElementById(dotId);
+        if (!dot) return;
+        dot.className = `indicator-dot ${state}`;
     }
 
     async fetchJSON(url, options = {}) {
@@ -424,7 +443,6 @@ class UCXSyncApp {
         this.stopBtn.disabled = !this.isRunning;
         this.projectSelect.disabled = this.isRunning;
         this.destinationSelect.disabled = this.isRunning;
-        this.destinationCustom.disabled = this.isRunning;
         this.parallelismInput.disabled = this.isRunning;
         if (this.forceFullResyncCheckbox) {
             this.forceFullResyncCheckbox.disabled = this.isRunning;
@@ -514,6 +532,7 @@ class UCXSyncApp {
         this.maxParallelismEl.textContent = status.max_parallelism || 8;
         this.updateActiveOpsColor(status.active_file_operations || 0, status.max_parallelism || 0);
         this.updateActivityTable((status.active_tasks || []).map(task => ({ ...task, instance: '—' })));
+        this.setIndicatorState('indicator-single-dot', status.is_running ? 'green' : 'yellow');
     }
 
     async refreshDashboardOverview() {
@@ -534,6 +553,21 @@ class UCXSyncApp {
         this.renderInstanceCards(overview.instances || []);
         this.updateDashboardControlsState(overview.instances || []);
         this.updateDashboardActivity(overview.instances || []);
+        this.updateDashboardIndicators(overview.instances || []);
+    }
+
+    updateDashboardIndicators(instances) {
+        instances.forEach(inst => {
+            let state;
+            if (!inst.available) {
+                state = 'red';
+            } else if (inst.status.is_running) {
+                state = 'green';
+            } else {
+                state = 'yellow';
+            }
+            this.setIndicatorState(`indicator-${inst.id}-dot`, state);
+        });
     }
 
     updateDashboardSummary(summary, instances) {

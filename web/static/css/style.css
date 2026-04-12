@@ -32,12 +32,19 @@ body {
 }
 
 header {
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 30px;
     padding: 20px;
     background: var(--card-bg);
     border-radius: 8px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.header-left {
+    display: flex;
+    flex-direction: column;
 }
 
 header h1 {
@@ -49,6 +56,51 @@ header h1 {
 .subtitle {
     color: var(--text-secondary);
     font-size: 1.1rem;
+}
+
+.service-indicators {
+    display: flex;
+    flex-direction: row;
+    gap: 16px;
+    align-items: center;
+}
+
+.service-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.indicator-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background-color: var(--text-secondary);
+    box-shadow: 0 0 6px rgba(0,0,0,0.4);
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.indicator-dot.green {
+    background-color: var(--success-color);
+    box-shadow: 0 0 8px var(--success-color);
+}
+
+.indicator-dot.yellow {
+    background-color: var(--warning-color);
+    box-shadow: 0 0 8px var(--warning-color);
+}
+
+.indicator-dot.red {
+    background-color: var(--danger-color);
+    box-shadow: 0 0 8px var(--danger-color);
+}
+
+.indicator-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+    letter-spacing: 0.05em;
 }
 
 section {
@@ -66,6 +118,54 @@ h2 {
 }
 
 /* Control Panel */
+.control-layout {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.control-counters {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 160px;
+    flex-shrink: 0;
+}
+
+.control-counters .status-card {
+    padding: 10px 14px;
+    text-align: left;
+}
+
+.control-counters .status-value {
+    font-size: 1.4rem;
+}
+
+.control-fields {
+    flex: 1;
+    min-width: 0;
+}
+
+.control-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 180px;
+    flex-shrink: 0;
+    align-self: flex-start;
+}
+
+.control-buttons .btn {
+    width: 100%;
+    text-align: center;
+    padding: 16px 16px;
+    font-size: 15px;
+    min-height: 72px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .form-group {
     margin-bottom: 15px;
 }
@@ -458,29 +558,136 @@ footer {
     background: #555;
 }
 
-/* Responsive */
-@media (max-width: 768px) {
+/* Responsive — tablet (≤1024px) */
+@media (max-width: 1024px) {
+    .control-layout {
+        flex-wrap: wrap;
+    }
+
+    .control-counters {
+        flex-direction: row;
+        flex-wrap: wrap;
+        min-width: 0;
+        width: 100%;
+        order: -1;
+    }
+
+    .control-counters .status-card {
+        flex: 1 1 120px;
+    }
+
+    .control-fields {
+        flex: 1 1 300px;
+    }
+
+    .control-buttons {
+        flex-direction: row;
+        flex-wrap: wrap;
+        min-width: 0;
+        width: 100%;
+    }
+
+    .control-buttons .btn {
+        flex: 1 1 140px;
+        min-height: 56px;
+    }
+
+    .metrics-grid {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    }
+
+    .instances-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Responsive — mobile (≤640px) */
+@media (max-width: 640px) {
     .container {
-        padding: 10px;
+        padding: 8px;
+    }
+
+    header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 14px;
     }
 
     header h1 {
-        font-size: 2rem;
+        font-size: 1.6rem;
+    }
+
+    .service-indicators {
+        flex-direction: row;
+        gap: 12px;
+    }
+
+    .control-layout {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .control-counters {
+        flex-direction: row;
+        flex-wrap: wrap;
+        width: 100%;
+    }
+
+    .control-counters .status-card {
+        flex: 1 1 calc(50% - 5px);
+        text-align: center;
+    }
+
+    .control-fields {
+        width: 100%;
+    }
+
+    .control-buttons {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .control-buttons .btn {
+        width: 100%;
+        min-height: 52px;
+    }
+
+    .input-group {
+        flex-wrap: wrap;
+    }
+
+    .input-group .btn {
+        flex: 0 0 auto;
     }
 
     .metrics-grid,
-    .status-grid,
     .instances-grid,
     .instance-grid {
         grid-template-columns: 1fr;
     }
 
-    .button-group {
-        flex-direction: column;
+    .table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
-    .btn {
-        width: 100%;
+    table {
+        min-width: 520px;
+    }
+
+    .log-container {
+        height: 180px;
+        font-size: 11px;
+    }
+
+    .modal-content {
+        width: 98%;
+        max-height: 95vh;
+    }
+
+    h2 {
+        font-size: 1.2rem;
     }
 }
 
