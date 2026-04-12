@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zangezia/UCXSync/internal/network"
 	"github.com/zangezia/UCXSync/internal/state"
 	"github.com/zangezia/UCXSync/pkg/models"
 )
@@ -183,31 +182,5 @@ func TestBuildDashboardSummaryUsesLatestTestCaptureAsCommonLastCapture(t *testin
 	}
 	if summary.TotalCompletedTest != 1 {
 		t.Fatalf("TotalCompletedTest = %d, want 1", summary.TotalCompletedTest)
-	}
-}
-
-func TestAttachMountWarningAddsMissingSharesToStatus(t *testing.T) {
-	t.Parallel()
-
-	netService := network.New([]string{"WU01"}, []string{"E$", "F$"}, "user", "pass")
-	netService.SetBaseMountDir(filepath.Join(t.TempDir(), "ucmount"))
-
-	server := &Server{netService: netService}
-	status := server.attachMountWarning(models.SyncStatus{})
-
-	if !status.HasMissingShares {
-		t.Fatal("expected HasMissingShares to be true")
-	}
-	if status.TotalShares != 2 {
-		t.Fatalf("TotalShares = %d, want 2", status.TotalShares)
-	}
-	if status.MountedShares != 0 {
-		t.Fatalf("MountedShares = %d, want 0", status.MountedShares)
-	}
-	if len(status.MissingShares) != 2 {
-		t.Fatalf("len(MissingShares) = %d, want 2", len(status.MissingShares))
-	}
-	if status.ShareWarning == "" {
-		t.Fatal("expected ShareWarning to be populated")
 	}
 }

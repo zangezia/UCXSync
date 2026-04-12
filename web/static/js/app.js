@@ -40,8 +40,6 @@ class UCXSyncApp {
         this.metricsTitle = document.getElementById('metrics-title');
         this.instancesPanel = document.getElementById('instances-panel');
         this.instancesGrid = document.getElementById('instances-grid');
-        this.shareWarningPanel = document.getElementById('share-warning-panel');
-        this.shareWarningMessage = document.getElementById('share-warning-message');
 
         // Controls
         this.projectSelect = document.getElementById('project');
@@ -509,7 +507,6 @@ class UCXSyncApp {
     updateSingleStatus(status) {
         this.isRunning = status.is_running;
         this.updateControlsState();
-        this.updateShareWarning(status);
         this.completedCapturesEl.textContent = status.completed_captures || 0;
         this.lastCaptureEl.textContent = status.last_capture_number || '-';
         this.testCapturesEl.textContent = status.completed_test_captures || 0;
@@ -532,7 +529,6 @@ class UCXSyncApp {
     }
 
     updateDashboardOverview(overview) {
-        this.updateDashboardShareWarning(overview.instances || []);
         this.updateDashboardSummary(overview.summary, overview.instances || []);
         this.updateMetrics(overview.host_metrics || {});
         this.renderInstanceCards(overview.instances || []);
@@ -598,7 +594,6 @@ class UCXSyncApp {
                     </div>
 
                     ${instance.error ? `<div class="instance-error">${this.escapeHtml(instance.error)}</div>` : ''}
-                    ${instance.status.has_missing_shares ? `<div class="instance-warning">${this.escapeHtml(instance.status.share_warning || 'Смонтированы не все шары')}</div>` : ''}
 
                     <div class="instance-grid">
                         <div class="instance-stat">
@@ -640,30 +635,6 @@ class UCXSyncApp {
         this.instancesGrid.querySelectorAll('[data-action]').forEach(button => {
             button.addEventListener('click', () => this.handleInstanceAction(button.dataset.action, button.dataset.instanceId));
         });
-    }
-
-    updateShareWarning(status) {
-        if (!this.shareWarningPanel || !this.shareWarningMessage) {
-            return;
-        }
-
-        const message = status?.has_missing_shares ? (status.share_warning || 'Смонтированы не все шары') : '';
-        this.shareWarningPanel.hidden = !message;
-        this.shareWarningMessage.textContent = message;
-    }
-
-    updateDashboardShareWarning(instances) {
-        if (!this.shareWarningPanel || !this.shareWarningMessage) {
-            return;
-        }
-
-        const warnings = instances
-            .filter(instance => instance.available && instance.status.has_missing_shares)
-            .map(instance => `${instance.name}: ${instance.status.share_warning || 'Смонтированы не все шары'}`);
-
-        const message = warnings.length > 0 ? warnings.join(' | ') : '';
-        this.shareWarningPanel.hidden = !message;
-        this.shareWarningMessage.textContent = message;
     }
 
     async handleInstanceAction(action, instanceId) {

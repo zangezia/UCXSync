@@ -260,7 +260,7 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := s.currentStatus()
+	status := s.syncService.GetStatus()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
@@ -366,7 +366,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Info().Str("remote", r.RemoteAddr).Msg("WebSocket client connected")
 
 	// Send initial status
-	status := s.currentStatus()
+	status := s.syncService.GetStatus()
 	s.sendToClient(conn, models.WSMessage{
 		Type:    "status",
 		Payload: status,
@@ -430,7 +430,7 @@ func (s *Server) broadcastMetrics(ctx context.Context, metricsChan <-chan models
 			lastMetrics = metrics
 		case <-ticker.C:
 			// Broadcast status
-			status := s.currentStatus()
+			status := s.syncService.GetStatus()
 			s.broadcast(models.WSMessage{
 				Type:    "status",
 				Payload: status,
@@ -443,28 +443,6 @@ func (s *Server) broadcastMetrics(ctx context.Context, metricsChan <-chan models
 			})
 		}
 	}
-}
-
-func (s *Server) currentStatus() models.SyncStatus {
-	status := s.syncService.GetStatus()
-	return s.attachMountWarning(status)
-}
-
-func (s *Server) attachMountWarning(status models.SyncStatus) models.SyncStatus {
-	if s.netService == nil {
-		return status
-	}
-
-	mountStatus := s.netService.GetMountStatus()
-	status.MountedShares = mountStatus.Mounted
-	status.TotalShares = mountStatus.Total
-	status.MissingShares = append([]string(nil), mountStatus.Missing...)
-	status.HasMissingShares = len(mountStatus.Missing) > 0
-	if status.HasMissingShares {
-		status.ShareWarning = fmt.Sprintf("Смонтированы не все шары: %d из %d. Отсутствуют: %s", mountStatus.Mounted, mountStatus.Total, strings.Join(mountStatus.Missing, ", "))
-	}
-
-	return status
 }
 
 // getAvailableDestinations scans for available storage destinations

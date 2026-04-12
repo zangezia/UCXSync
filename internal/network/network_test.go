@@ -1,7 +1,6 @@
 package network
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -37,23 +36,5 @@ func TestBuildMountOptionsKeepsExplicitVersion(t *testing.T) {
 	}
 	if !strings.Contains(joined, "vers=2.0") {
 		t.Fatalf("expected explicit vers=2.0 to be preserved, got %v", opts)
-	}
-}
-
-func TestGetMountStatusReportsMissingShares(t *testing.T) {
-	t.Parallel()
-
-	svc := New([]string{"WU01", "WU02"}, []string{"E$", "F$"}, "user", "pass")
-	svc.SetBaseMountDir(filepath.Join(t.TempDir(), "ucmount"))
-
-	status := svc.GetMountStatus()
-	if status.Total != 4 {
-		t.Fatalf("Total = %d, want 4", status.Total)
-	}
-	if status.Mounted != 0 {
-		t.Fatalf("Mounted = %d, want 0", status.Mounted)
-	}
-	if len(status.Missing) != 4 {
-		t.Fatalf("len(Missing) = %d, want 4", len(status.Missing))
 	}
 }
