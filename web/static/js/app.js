@@ -170,7 +170,6 @@ class UCXSyncApp {
         this.stopBtn.textContent = '⏹️ Остановить оба';
         this.mountSharesBtn.textContent = '🔁 Смонтировать шары на обоих';
         this.restartServiceBtn.textContent = '♻️ Перезапустить оба сервиса';
-        this.instancesPanel.hidden = false;
         this.log('Общий дашборд включен', 'info');
     }
 
@@ -694,8 +693,11 @@ class UCXSyncApp {
         this.networkValue.textContent = `${netMBps} MB/s`;
 
         const interfaceMetrics = this.selectNetworkInterfaces(metrics.network_interfaces || []);
-        this.updateNetworkInterfaceCard(this.networkPrimaryLabel, this.networkPrimaryProgress, this.networkPrimaryValue, interfaceMetrics[0], 'Сеть #1');
-        this.updateNetworkInterfaceCard(this.networkSecondaryLabel, this.networkSecondaryProgress, this.networkSecondaryValue, interfaceMetrics[1], 'Сеть #2');
+        const inst = this.dashboardConfig.instances || [];
+        const primaryLanLabel = (this.mode === 'dashboard' && inst.length > 0) ? `LAN ${inst[0].name}` : 'Сеть #1';
+        const secondaryLanLabel = (this.mode === 'dashboard' && inst.length > 1) ? `LAN ${inst[1].name}` : 'Сеть #2';
+        this.updateNetworkInterfaceCard(this.networkPrimaryLabel, this.networkPrimaryProgress, this.networkPrimaryValue, interfaceMetrics[0], primaryLanLabel);
+        this.updateNetworkInterfaceCard(this.networkSecondaryLabel, this.networkSecondaryProgress, this.networkSecondaryValue, interfaceMetrics[1], secondaryLanLabel);
 
         const freeDiskGB = Number(metrics.free_disk_gb || 0).toFixed(1);
         this.freeDiskEl.textContent = `${freeDiskGB} GB`;
@@ -735,7 +737,7 @@ class UCXSyncApp {
 
         const percent = Math.min(100, Math.round(metric.percent || 0));
         const mbps = Number(metric.mbps || 0).toFixed(2);
-        labelEl.textContent = `Сеть ${metric.name}`;
+        labelEl.textContent = fallbackLabel;
         progressEl.style.width = `${percent}%`;
         valueEl.textContent = `${mbps} MB/s`;
     }
