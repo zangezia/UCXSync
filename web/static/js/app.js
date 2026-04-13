@@ -619,9 +619,12 @@ class UCXSyncApp {
     }
 
     updateDashboardSummary(summary, instances) {
-        this.completedCapturesEl.textContent = summary.total_completed_captures || 0;
-        this.lastCaptureEl.textContent = summary.last_capture_number || summary.last_test_capture_number || '-';
-        this.testCapturesEl.textContent = summary.total_completed_test_captures || 0;
+        const selectedProject = this.projectSelect.value;
+        if (!selectedProject) {
+            this.completedCapturesEl.textContent = summary.total_completed_captures || 0;
+            this.lastCaptureEl.textContent = summary.last_capture_number || summary.last_test_capture_number || '-';
+            this.testCapturesEl.textContent = summary.total_completed_test_captures || 0;
+        }
         this.activeOpsCountEl.textContent = summary.total_active_file_operations || 0;
         this.maxParallelismEl.textContent = summary.total_max_parallelism || 0;
         this.updateActiveOpsColor(summary.total_active_file_operations || 0, summary.total_max_parallelism || 0);
