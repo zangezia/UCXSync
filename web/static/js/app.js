@@ -298,7 +298,8 @@ class UCXSyncApp {
     }
 
     populateProjects(projects) {
-        const previousValue = this.projectSelect.value;
+        // Prefer the current dropdown value; fall back to the saved setting from localStorage.
+        const previousValue = this.projectSelect.value || this.savedProject || '';
         this.projectSelect.innerHTML = '<option value="">-- Выберите проект --</option>';
         projects.forEach(project => {
             const option = document.createElement('option');
@@ -309,6 +310,11 @@ class UCXSyncApp {
 
         if (previousValue) {
             this.projectSelect.value = previousValue;
+        }
+
+        // After restoring the selection, load the correct stats for the visible project.
+        if (!this.isRunning) {
+            this.loadProjectStats();
         }
     }
 
@@ -557,15 +563,18 @@ class UCXSyncApp {
     }
 
     updateSingleStatus(status) {
+        const wasRunning = this.isRunning;
         this.isRunning = status.is_running;
         this.updateControlsState();
-        // Only overwrite counters when the status belongs to the currently selected project.
-        // Never use is_running as a bypass — the running project may differ from the selected one.
         const selectedProject = this.projectSelect.value;
-        if (!selectedProject || status.project === selectedProject) {
+        if (status.is_running && status.project && status.project === selectedProject) {
+            // Live update only while sync is actively running for the selected project.
             this.completedCapturesEl.textContent = status.completed_captures || 0;
             this.lastCaptureEl.textContent = status.last_capture_number || '-';
             this.testCapturesEl.textContent = status.completed_test_captures || 0;
+        } else if (wasRunning && !status.is_running) {
+            // Sync just stopped — refresh counters from the accurate DB source.
+            this.loadProjectStats();
         }
         this.activeOpsCountEl.textContent = status.active_file_operations || 0;
         this.maxParallelismEl.textContent = status.max_parallelism || 8;
@@ -909,6 +918,8 @@ class UCXSyncApp {
                 const settings = JSON.parse(saved);
                 if (settings.destinationCustom) this.destinationCustom.value = settings.destinationCustom;
                 if (settings.parallelism) this.parallelismInput.value = settings.parallelism;
+                // Project options may not exist yet — remember for populateProjects.
+                this.savedProject = settings.project || '';
                 if (settings.project) this.projectSelect.value = settings.project;
                 if (settings.destination) this.destinationSelect.value = settings.destination;
                 if (this.forceFullResyncCheckbox) this.forceFullResyncCheckbox.checked = !!settings.forceFullResync;
