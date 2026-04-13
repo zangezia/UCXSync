@@ -626,7 +626,7 @@ func (s *Store) latestCompletedCapture(tx *sql.Tx, project string, isTest bool) 
 		SELECT capture_number
 		FROM captures
 		WHERE service_name = ? AND project_name = ? AND completed = 1 AND is_test = ?
-		ORDER BY completed_at DESC, capture_number DESC
+		ORDER BY CAST(capture_number AS INTEGER) DESC, capture_number DESC
 		LIMIT 1
 	`, aggregateCaptureServiceName, project, boolToInt(isTest)).Scan(&captureNumber)
 	if err == sql.ErrNoRows {
