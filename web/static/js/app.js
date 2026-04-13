@@ -567,8 +567,8 @@ class UCXSyncApp {
         this.isRunning = status.is_running;
         this.updateControlsState();
         const selectedProject = this.projectSelect.value;
-        if (status.is_running && status.project && status.project === selectedProject) {
-            // Live update only while sync is actively running for the selected project.
+        if (status.is_running) {
+            // Live update during active sync — always update regardless of selected project.
             this.completedCapturesEl.textContent = status.completed_captures || 0;
             this.lastCaptureEl.textContent = status.last_capture_number || '-';
             this.testCapturesEl.textContent = status.completed_test_captures || 0;
@@ -620,7 +620,9 @@ class UCXSyncApp {
 
     updateDashboardSummary(summary, instances) {
         const selectedProject = this.projectSelect.value;
-        if (!selectedProject) {
+        const anyRunning = this.isRunning;
+        // Update counters when: sync is active (live progress), or no project selected (idle overview)
+        if (anyRunning || !selectedProject) {
             this.completedCapturesEl.textContent = summary.total_completed_captures || 0;
             this.lastCaptureEl.textContent = summary.last_capture_number || summary.last_test_capture_number || '-';
             this.testCapturesEl.textContent = summary.total_completed_test_captures || 0;
