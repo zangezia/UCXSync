@@ -548,6 +548,8 @@ class UCXSyncApp {
                 ? `/api/dashboard/project-stats?project=${encodeURIComponent(project)}`
                 : `/api/project-stats?project=${encodeURIComponent(project)}`;
             const stats = await this.fetchJSON(endpoint);
+            // Discard stale response if the user already switched to a different project
+            if (this.projectSelect.value !== project) return;
             this.completedCapturesEl.textContent = stats.completed_captures || 0;
             this.testCapturesEl.textContent = stats.completed_test_captures || 0;
             this.lastCaptureEl.textContent = stats.last_capture_number || '-';
@@ -557,9 +559,10 @@ class UCXSyncApp {
     updateSingleStatus(status) {
         this.isRunning = status.is_running;
         this.updateControlsState();
-        // Only overwrite counters from WebSocket when sync is running with the selected project
+        // Only overwrite counters when the status belongs to the currently selected project.
+        // Never use is_running as a bypass — the running project may differ from the selected one.
         const selectedProject = this.projectSelect.value;
-        if (status.is_running || !selectedProject || status.project === selectedProject) {
+        if (!selectedProject || status.project === selectedProject) {
             this.completedCapturesEl.textContent = status.completed_captures || 0;
             this.lastCaptureEl.textContent = status.last_capture_number || '-';
             this.testCapturesEl.textContent = status.completed_test_captures || 0;
