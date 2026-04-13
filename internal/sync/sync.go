@@ -234,6 +234,11 @@ func (s *Service) Start(ctx context.Context, project, destination string, maxPar
 				s.cancel = nil
 				return fmt.Errorf("failed to reset copied file state: %w", err)
 			}
+			if err := s.stateStore.ResetProjectCaptureStatus(project); err != nil {
+				s.isRunning = false
+				s.cancel = nil
+				return fmt.Errorf("failed to reset capture status: %w", err)
+			}
 		}
 
 		persisted, err := s.stateStore.StartRun(project, destination, maxParallelism)
@@ -672,6 +677,24 @@ func (s *Service) shouldCopyFile(sourcePath, sourceRoot, destRoot string) bool {
 		}
 		if err != nil {
 			log.Warn().Err(err).Str("file", relPath).Msg("Failed to check persisted copied file state")
+		}
+
+		// If the file is not conclusively in copied_files, check whether its
+		// parent capture has already been marked complete. A completed capture
+		// must not be re-downloaded unless the user explicitly requests a full
+		// re-sync (forceFullResync flag).
+		capInfo := parseCaptureFileName(filepath.Base(sourcePath))
+		if capInfo == nil {
+			capInfo = parseMetadataFileName(filepath.Base(sourcePath))
+		}
+		if capInfo == nil {
+			capInfo = parseRawQvFileName(filepath.Base(sourcePath))
+		}
+		if capInfo != nil && capInfo.CaptureNumber != "" {
+			done, doneErr := store.IsCaptureDone(project, capInfo.CaptureNumber)
+			if doneErr == nil && done {
+				return false
+			}
 		}
 	}
 

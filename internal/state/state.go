@@ -362,6 +362,55 @@ func (s *Store) ResetCopiedFiles(project string) error {
 	`, project)
 }
 
+// IsCaptureDone reports whether the given capture has been marked completed
+// in the aggregate captures table. Returns false if the capture is unknown.
+func (s *Store) IsCaptureDone(project, captureNumber string) (bool, error) {
+	if strings.TrimSpace(project) == "" || strings.TrimSpace(captureNumber) == "" {
+		return false, nil
+	}
+
+	var completed int
+	err := s.db.QueryRow(`
+		SELECT COALESCE(completed, 0)
+		FROM captures
+		WHERE service_name = ? AND project_name = ? AND capture_number = ?
+	`, aggregateCaptureServiceName, project, captureNumber).Scan(&completed)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return completed > 0, nil
+}
+
+// ResetProjectCaptureStatus resets the completion state of all captures for
+// the given project: clears capture_files records and sets completed=0 so
+// the counters start rebuilding from scratch on the next sync run.
+func (s *Store) ResetProjectCaptureStatus(project string) error {
+	if strings.TrimSpace(project) == "" {
+		return nil
+	}
+
+	return s.withWriteTx(func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			DELETE FROM capture_files
+			WHERE service_name = ? AND project_name = ?
+		`, aggregateCaptureServiceName, project)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(`
+			UPDATE captures
+			SET completed = 0, completed_at = NULL, raw_count = 0, has_xml = 0, has_dat = 0
+			WHERE service_name = ? AND project_name = ?
+		`, aggregateCaptureServiceName, project)
+		return err
+	})
+}
+
 func (s *Store) RecordCapture(obs CaptureObservation) (models.PersistedCaptureStatus, bool, error) {
 	if strings.TrimSpace(obs.Project) == "" {
 		return models.PersistedCaptureStatus{}, false, nil
