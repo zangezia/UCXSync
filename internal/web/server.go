@@ -162,6 +162,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/devices/mount", s.handleMountDevice)
 	mux.HandleFunc("/api/shares/mount", s.handleMountShares)
 	mux.HandleFunc("/api/service/restart", s.handleRestartService)
+	mux.HandleFunc("/api/host/shutdown", s.handleHostShutdown)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
 	mux.HandleFunc("/api/project-stats", s.handleGetProjectStats)
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
@@ -776,6 +777,33 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
+}
+
+func (s *Server) handleHostShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cmd := exec.Command("sh", "-c", "sleep 2; shutdown -h now")
+	if err := cmd.Start(); err != nil {
+		log.Error().Err(err).Msg("Failed to schedule host shutdown")
+		http.Error(w, fmt.Sprintf("failed to shutdown host: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcast(models.WSMessage{
+		Type: "log",
+		Payload: models.LogMessage{
+			Timestamp: time.Now(),
+			Level:     "warn",
+			Message:   "Запрошено выключение хоста",
+		},
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "shutting_down"})
 }
 
 func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {

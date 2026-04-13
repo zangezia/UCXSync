@@ -53,6 +53,7 @@ class UCXSyncApp {
         this.manageDevicesBtn = document.getElementById('manage-devices-btn');
         this.mountSharesBtn = document.getElementById('mount-shares-btn');
         this.restartServiceBtn = document.getElementById('restart-service-btn');
+        this.shutdownHostBtn = document.getElementById('shutdown-host-btn');
 
         // Status
         this.completedCapturesEl = document.getElementById('completed-captures');
@@ -140,6 +141,8 @@ class UCXSyncApp {
                 this.restartService();
             }
         });
+
+        this.shutdownHostBtn?.addEventListener('click', () => this.shutdownHost());
 
         // Auto-save settings and refresh stats on project change
         this.projectSelect.addEventListener('change', () => {
@@ -514,6 +517,22 @@ class UCXSyncApp {
         } catch (error) {
             this.log(`✗ Ошибка перезапуска службы: ${error.message}`, 'error');
             this.restartServiceBtn.disabled = false;
+        }
+    }
+
+    async shutdownHost() {
+        if (!window.confirm('Выключить хост полностью? Веб-интерфейс станет недоступен.')) {
+            return;
+        }
+
+        this.shutdownHostBtn.disabled = true;
+
+        try {
+            await this.fetchJSON('/api/host/shutdown', { method: 'POST' });
+            this.log('⏻ Команда на выключение хоста отправлена', 'warn');
+        } catch (error) {
+            this.log(`✗ Ошибка выключения хоста: ${error.message}`, 'error');
+            this.shutdownHostBtn.disabled = false;
         }
     }
 
