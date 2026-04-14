@@ -470,11 +470,8 @@ func (s *Service) FindProjects(ctx context.Context) ([]models.ProjectInfo, error
 		})
 	}
 
-	if len(projects) == 0 && s.stateStore != nil {
-		cachedProjects, err := s.stateStore.LoadProjects()
-		if err == nil && len(cachedProjects) > 0 {
-			return cachedProjects, nil
-		}
+	if len(projects) == 0 {
+		return projects, nil
 	}
 
 	if s.stateStore != nil && len(projects) > 0 {
