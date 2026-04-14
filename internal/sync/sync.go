@@ -363,6 +363,16 @@ func (s *Service) GetStatus() models.SyncStatus {
 			status.LastCaptureNumber = persisted.LastCaptureNumber
 			status.LastTestCaptureNumber = persisted.LastTestCaptureNumber
 		}
+		// Read counters directly from captures table — always up-to-date,
+		// regardless of whether sync_status was updated by RecordCapture.
+		if status.Project != "" {
+			if ps, err := store.LoadProjectStatus(status.Project); err == nil {
+				status.CompletedCaptures = ps.CompletedCaptures
+				status.CompletedTestCaptures = ps.CompletedTestCaptures
+				status.LastCaptureNumber = ps.LastCaptureNumber
+				status.LastTestCaptureNumber = ps.LastTestCaptureNumber
+			}
+		}
 	}
 
 	return status

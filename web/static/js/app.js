@@ -142,7 +142,17 @@ class UCXSyncApp {
             }
         });
 
-        this.shutdownHostBtn?.addEventListener('click', () => this.shutdownHost());
+        const controlButtons = document.querySelector('.control-buttons');
+        if (controlButtons) {
+            controlButtons.addEventListener('click', (event) => {
+                const shutdownButton = event.target.closest('#shutdown-host-btn');
+                if (shutdownButton) {
+                    event.preventDefault();
+                    this.shutdownHost();
+                }
+            });
+        }
+
 
         // Auto-save settings and refresh stats on project change
         this.projectSelect.addEventListener('change', () => {
@@ -585,15 +595,32 @@ class UCXSyncApp {
         const wasRunning = this.isRunning;
         this.isRunning = status.is_running;
         this.updateControlsState();
-        const selectedProject = this.projectSelect.value;
         if (status.is_running) {
-            // Live update during active sync — always update regardless of selected project.
-            this.completedCapturesEl.textContent = status.completed_captures || 0;
-            this.lastCaptureEl.textContent = status.last_capture_number || '-';
-            this.testCapturesEl.textContent = status.completed_test_captures || 0;
-        } else if (wasRunning && !status.is_running) {
-            // Sync just stopped — refresh counters from the accurate DB source.
-            this.loadProjectStats();
+            // Live update during active sync.
+            if (status.completed_captures != null) {
+                this.completedCapturesEl.textContent = status.completed_captures;
+            }
+            if (status.last_capture_number != null && status.last_capture_number !== '') {
+                this.lastCaptureEl.textContent = status.last_capture_number;
+            }
+            if (status.completed_test_captures != null) {
+                this.testCapturesEl.textContent = status.completed_test_captures;
+            }
+            // Periodic API refresh as safety net (every ~15 s).
+            if (!this._statsRefreshTimer) {
+                this._statsRefreshTimer = setInterval(() => {
+                    if (this.isRunning) this.loadProjectStats();
+                }, 15000);
+            }
+        } else {
+            if (this._statsRefreshTimer) {
+                clearInterval(this._statsRefreshTimer);
+                this._statsRefreshTimer = null;
+            }
+            if (wasRunning && !status.is_running) {
+                // Sync just stopped — refresh counters from the accurate DB source.
+                this.loadProjectStats();
+            }
         }
         this.activeOpsCountEl.textContent = status.active_file_operations || 0;
         this.maxParallelismEl.textContent = status.max_parallelism || 8;
