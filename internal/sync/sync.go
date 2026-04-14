@@ -306,6 +306,13 @@ func (s *Service) Stop() {
 	log.Info().Msg("Synchronization stopped")
 }
 
+// IsProjectRunning reports whether the given project is currently being synced.
+func (s *Service) IsProjectRunning(project string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.isRunning && s.project == project
+}
+
 // GetStatus returns current sync status
 func (s *Service) GetStatus() models.SyncStatus {
 	s.mu.RLock()

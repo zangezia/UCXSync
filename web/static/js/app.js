@@ -49,6 +49,7 @@ class UCXSyncApp {
         this.forceFullResyncCheckbox = document.getElementById('force-full-resync');
         this.startBtn = document.getElementById('start-btn');
         this.stopBtn = document.getElementById('stop-btn');
+        this.clearHistoryBtn = document.getElementById('clear-history-btn');
         this.refreshBtn = document.getElementById('refresh-projects');
         this.manageDevicesBtn = document.getElementById('manage-devices-btn');
         this.mountSharesBtn = document.getElementById('mount-shares-btn');
@@ -113,6 +114,8 @@ class UCXSyncApp {
                 this.stopSync();
             }
         });
+
+        this.clearHistoryBtn?.addEventListener('click', () => this.clearProjectHistory());
 
         this.refreshBtn.addEventListener('click', () => {
             if (this.mode === 'dashboard') {
@@ -511,6 +514,36 @@ class UCXSyncApp {
             this.log(`✗ Ошибка монтирования шар: ${error.message}`, 'error');
         } finally {
             this.mountSharesBtn.disabled = false;
+        }
+    }
+
+    async clearProjectHistory() {
+        const project = this.projectSelect.value;
+        if (!project) {
+            this.log('✗ Выберите проект для очистки истории', 'error');
+            return;
+        }
+
+        if (!window.confirm(`Очистить всю историю скачивания проекта '${project}'?\n\nБудут удалены:\n• Записи о скачанных файлах\n• Статистика снимков\n\nСледующий запуск скачает всё заново.`)) {
+            return;
+        }
+
+        this.clearHistoryBtn.disabled = true;
+
+        try {
+            await this.fetchJSON('/api/project/clear-history', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project })
+            });
+            this.log(`🗑️ История проекта '${project}' очищена`, 'warn');
+            this.completedCapturesEl.textContent = 0;
+            this.testCapturesEl.textContent = 0;
+            this.lastCaptureEl.textContent = '-';
+        } catch (error) {
+            this.log(`✗ Ошибка очистки истории: ${error.message}`, 'error');
+        } finally {
+            this.clearHistoryBtn.disabled = false;
         }
     }
 

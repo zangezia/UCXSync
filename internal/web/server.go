@@ -165,6 +165,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/host/shutdown", s.handleHostShutdown)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
 	mux.HandleFunc("/api/project-stats", s.handleGetProjectStats)
+	mux.HandleFunc("/api/project/clear-history", s.handleClearProjectHistory)
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("/api/sync/start", s.handleStartSync)
 	mux.HandleFunc("/api/sync/stop", s.handleStopSync)
@@ -750,6 +751,50 @@ func (s *Server) handleMountShares(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "mounted"})
+}
+
+func (s *Server) handleClearProjectHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Project string `json:"project"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Project) == "" {
+		http.Error(w, "project field required", http.StatusBadRequest)
+		return
+	}
+
+	if s.syncService.IsProjectRunning(body.Project) {
+		http.Error(w, "cannot clear history while sync is running", http.StatusConflict)
+		return
+	}
+
+	if s.stateStore == nil {
+		http.Error(w, "state store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := s.stateStore.ClearProjectHistory(body.Project); err != nil {
+		log.Error().Err(err).Str("project", body.Project).Msg("Failed to clear project history")
+		http.Error(w, fmt.Sprintf("failed to clear history: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Info().Str("project", body.Project).Msg("Project history cleared")
+	s.broadcast(models.WSMessage{
+		Type: "log",
+		Payload: models.LogMessage{
+			Timestamp: time.Now(),
+			Level:     "warn",
+			Message:   fmt.Sprintf("История проекта '%s' очищена", body.Project),
+		},
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "cleared", "project": body.Project})
 }
 
 func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {

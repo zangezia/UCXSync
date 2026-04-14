@@ -362,6 +362,33 @@ func (s *Store) ResetCopiedFiles(project string) error {
 	`, project)
 }
 
+// ClearProjectHistory removes all download history for the given project:
+// copied_files records, capture tracking data, and resets sync_status counters.
+func (s *Store) ClearProjectHistory(project string) error {
+	if strings.TrimSpace(project) == "" {
+		return nil
+	}
+
+	return s.withWriteTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM copied_files WHERE project_name = ?`, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM capture_files WHERE service_name = ? AND project_name = ?`, aggregateCaptureServiceName, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM captures WHERE service_name = ? AND project_name = ?`, aggregateCaptureServiceName, project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`
+			UPDATE sync_status
+			SET completed_captures = 0, completed_test_captures = 0,
+			    last_capture_number = '', last_test_capture_number = ''
+			WHERE project = ?
+		`, project)
+		return err
+	})
+}
+
 // IsCaptureDone reports whether the given capture has been marked completed
 // in the aggregate captures table. Returns false if the capture is unknown.
 func (s *Store) IsCaptureDone(project, captureNumber string) (bool, error) {
