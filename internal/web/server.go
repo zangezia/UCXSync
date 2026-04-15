@@ -161,6 +161,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/devices", s.handleGetDevices)
 	mux.HandleFunc("/api/devices/mount", s.handleMountDevice)
 	mux.HandleFunc("/api/shares/mount", s.handleMountShares)
+	mux.HandleFunc("/api/shares/check", s.handleCheckShares)
 	mux.HandleFunc("/api/service/restart", s.handleRestartService)
 	mux.HandleFunc("/api/host/shutdown", s.handleHostShutdown)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
@@ -721,6 +722,33 @@ func (s *Server) handleMountDevice(w http.ResponseWriter, r *http.Request) {
 		"action": req.Action,
 		"device": req.DevicePath,
 	})
+}
+
+func (s *Server) handleCheckShares(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	unavailable := s.syncService.CheckSharesAvailability()
+
+	type shareStatus struct {
+		Node  string `json:"node"`
+		Share string `json:"share"`
+		Path  string `json:"path"`
+	}
+	type result struct {
+		OK          bool          `json:"ok"`
+		Unavailable []shareStatus `json:"unavailable"`
+	}
+
+	res := result{OK: len(unavailable) == 0, Unavailable: []shareStatus{}}
+	for _, u := range unavailable {
+		res.Unavailable = append(res.Unavailable, shareStatus{Node: u.Node, Share: u.Share, Path: u.Path})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
 
 func (s *Server) handleMountShares(w http.ResponseWriter, r *http.Request) {

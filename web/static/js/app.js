@@ -388,6 +388,20 @@ class UCXSyncApp {
             return;
         }
 
+        // Check shares availability before starting
+        try {
+            const check = await this.fetchJSON('/api/shares/check');
+            if (!check.ok) {
+                const list = check.unavailable.map(u => `${u.node}/${u.share}`).join(', ');
+                this.log(`✗ Невозможно запустить: недоступны шары — ${list}`, 'error');
+                this.log('Используйте кнопку «Смонтировать шары» и повторите попытку', 'warn');
+                return;
+            }
+        } catch (e) {
+            this.log(`✗ Ошибка проверки шар: ${e.message}`, 'error');
+            return;
+        }
+
         try {
             await this.fetchJSON('/api/sync/start', {
                 method: 'POST',
