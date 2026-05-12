@@ -95,6 +95,37 @@ type DestinationInfo struct {
 	IsDefault   bool    `json:"is_default"`
 }
 
+// PreflightCheck describes one readiness condition for starting synchronization.
+type PreflightCheck struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+// PreflightUnavailableShare describes one inaccessible UCX share.
+type PreflightUnavailableShare struct {
+	Node  string `json:"node"`
+	Share string `json:"share"`
+	Path  string `json:"path"`
+}
+
+// PreflightStatus is the payload used by the start-readiness panel.
+type PreflightStatus struct {
+	Ready                 bool                        `json:"ready"`
+	IsRunning             bool                        `json:"is_running"`
+	SelectedProject       string                      `json:"selected_project"`
+	SelectedDestination   string                      `json:"selected_destination"`
+	ActiveProject         string                      `json:"active_project,omitempty"`
+	ActiveDestination     string                      `json:"active_destination,omitempty"`
+	AvailableProjects     int                         `json:"available_projects"`
+	AvailableDestinations int                         `json:"available_destinations"`
+	FreeSpaceGB           float64                     `json:"free_space_gb,omitempty"`
+	RequiredFreeSpaceGB   float64                     `json:"required_free_space_gb,omitempty"`
+	UnavailableShares     []PreflightUnavailableShare `json:"unavailable_shares,omitempty"`
+	Checks                []PreflightCheck            `json:"checks"`
+}
+
 // BlockDeviceInfo holds information about a block device
 type BlockDeviceInfo struct {
 	DevicePath  string `json:"device_path"`  // e.g., /dev/sdb1

@@ -190,6 +190,15 @@ func (s *Service) SetDiskSpaceThresholds(minFreeBytes, safetyMarginBytes int64) 
 	s.diskSpaceSafetyMargin = safetyMarginBytes
 }
 
+// DiskSpaceCheckResult describes whether a destination has enough free space.
+type DiskSpaceCheckResult struct {
+	OK                bool
+	FreeBytes         uint64
+	RequiredFreeBytes int64
+	MinFreeBytes      int64
+	SafetyMarginBytes int64
+}
+
 // SetStateStore enables persistent SQLite-backed state for the service.
 func (s *Service) SetStateStore(store *state.Store) error {
 	s.mu.Lock()
@@ -1135,6 +1144,27 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 }
 
 func (s *Service) checkDiskSpace(path string) bool {
+	result, err := s.CheckDiskSpace(path)
+	if err != nil {
+		log.Error().Err(err).Str("path", path).Msg("Failed to check free disk space")
+		return false
+	}
+
+	if !result.OK {
+		log.Warn().
+			Str("path", path).
+			Uint64("free_bytes", result.FreeBytes).
+			Int64("required_free_bytes", result.RequiredFreeBytes).
+			Int64("min_free_disk_space", result.MinFreeBytes).
+			Int64("disk_space_safety_margin", result.SafetyMarginBytes).
+			Msg("Insufficient free disk space, skipping sync iteration")
+	}
+
+	return result.OK
+}
+
+// CheckDiskSpace reports the current free-space status for a destination.
+func (s *Service) CheckDiskSpace(path string) (DiskSpaceCheckResult, error) {
 	s.mu.RLock()
 	diskUsage := s.diskUsage
 	minFreeDiskSpace := s.minFreeDiskSpace
@@ -1147,27 +1177,24 @@ func (s *Service) checkDiskSpace(path string) bool {
 
 	usage, err := diskUsage(path)
 	if err != nil {
-		log.Error().Err(err).Str("path", path).Msg("Failed to check free disk space")
-		return false
+		return DiskSpaceCheckResult{}, err
 	}
 
 	requiredFree := minFreeDiskSpace + safetyMargin
-	if requiredFree <= 0 {
-		return true
+	result := DiskSpaceCheckResult{
+		OK:                requiredFree <= 0 || int64(usage.Free) >= requiredFree,
+		FreeBytes:         usage.Free,
+		RequiredFreeBytes: requiredFree,
+		MinFreeBytes:      minFreeDiskSpace,
+		SafetyMarginBytes: safetyMargin,
 	}
 
-	if int64(usage.Free) < requiredFree {
-		log.Warn().
-			Str("path", path).
-			Uint64("free_bytes", usage.Free).
-			Int64("required_free_bytes", requiredFree).
-			Int64("min_free_disk_space", minFreeDiskSpace).
-			Int64("disk_space_safety_margin", safetyMargin).
-			Msg("Insufficient free disk space, skipping sync iteration")
-		return false
-	}
+	return result, nil
+}
 
-	return true
+// EnsureDestinationReady validates that the destination mount requirements are satisfied.
+func (s *Service) EnsureDestinationReady(destination string) error {
+	return ensureDestinationReady(destination)
 }
 
 func parseCaptureFileName(filename string) *models.CaptureInfo {

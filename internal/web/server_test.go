@@ -2,6 +2,9 @@ package web
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -236,4 +239,195 @@ func TestAutoRemountSharesRetriesWhenSharesUnavailable(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("autoRemountShares did not stop after context cancellation")
 	}
+}
+
+func TestBuildPreflightStatusReady(t *testing.T) {
+	t.Parallel()
+
+	server := newPreflightTestServer(models.SyncStatus{}, nil)
+
+	preflight := server.buildPreflightStatus(context.Background(), "ProjA", "/ucdata")
+
+	if !preflight.Ready {
+		t.Fatalf("preflight.Ready = false, want true")
+	}
+
+	if len(preflight.Checks) != 6 {
+		t.Fatalf("len(preflight.Checks) = %d, want 6", len(preflight.Checks))
+	}
+
+	for _, check := range preflight.Checks {
+		if check.Status != "ready" {
+			t.Fatalf("check %q status = %q, want ready", check.Key, check.Status)
+		}
+	}
+
+	if preflight.AvailableProjects != 1 {
+		t.Fatalf("AvailableProjects = %d, want 1", preflight.AvailableProjects)
+	}
+	if preflight.AvailableDestinations != 1 {
+		t.Fatalf("AvailableDestinations = %d, want 1", preflight.AvailableDestinations)
+	}
+}
+
+func TestBuildPreflightStatusMissingProjectBlocksStart(t *testing.T) {
+	t.Parallel()
+
+	server := newPreflightTestServer(models.SyncStatus{}, nil)
+
+	preflight := server.buildPreflightStatus(context.Background(), "", "/ucdata")
+
+	if preflight.Ready {
+		t.Fatalf("preflight.Ready = true, want false")
+	}
+
+	projectCheck := findPreflightCheck(t, preflight, "project")
+	if projectCheck.Status != "blocked" {
+		t.Fatalf("project check status = %q, want blocked", projectCheck.Status)
+	}
+}
+
+func TestBuildPreflightStatusUnavailableSharesBlocksStart(t *testing.T) {
+	t.Parallel()
+
+	server := newPreflightTestServer(models.SyncStatus{}, func(s *Server) {
+		s.checkSharesAvailability = func() []syncService.UnavailableShare {
+			return []syncService.UnavailableShare{{Node: "WU01", Share: "E$", Path: "/ucmount/WU01/E"}}
+		}
+	})
+
+	preflight := server.buildPreflightStatus(context.Background(), "ProjA", "/ucdata")
+
+	if preflight.Ready {
+		t.Fatalf("preflight.Ready = true, want false")
+	}
+
+	sharesCheck := findPreflightCheck(t, preflight, "shares")
+	if sharesCheck.Status != "blocked" {
+		t.Fatalf("shares check status = %q, want blocked", sharesCheck.Status)
+	}
+	if len(preflight.UnavailableShares) != 1 {
+		t.Fatalf("len(preflight.UnavailableShares) = %d, want 1", len(preflight.UnavailableShares))
+	}
+}
+
+func TestBuildPreflightStatusLowDiskSpaceBlocksStart(t *testing.T) {
+	t.Parallel()
+
+	server := newPreflightTestServer(models.SyncStatus{}, func(s *Server) {
+		s.checkDiskSpaceFunc = func(string) (syncService.DiskSpaceCheckResult, error) {
+			return syncService.DiskSpaceCheckResult{
+				OK:                false,
+				FreeBytes:         2 * 1024 * 1024 * 1024,
+				RequiredFreeBytes: 5 * 1024 * 1024 * 1024,
+			}, nil
+		}
+	})
+
+	preflight := server.buildPreflightStatus(context.Background(), "ProjA", "/ucdata")
+
+	if preflight.Ready {
+		t.Fatalf("preflight.Ready = true, want false")
+	}
+
+	diskCheck := findPreflightCheck(t, preflight, "disk")
+	if diskCheck.Status != "blocked" {
+		t.Fatalf("disk check status = %q, want blocked", diskCheck.Status)
+	}
+	if preflight.RequiredFreeSpaceGB <= preflight.FreeSpaceGB {
+		t.Fatalf("RequiredFreeSpaceGB = %f, FreeSpaceGB = %f, want required > free", preflight.RequiredFreeSpaceGB, preflight.FreeSpaceGB)
+	}
+}
+
+func TestBuildPreflightStatusRunningSyncBlocksStart(t *testing.T) {
+	t.Parallel()
+
+	server := newPreflightTestServer(models.SyncStatus{
+		IsRunning:   true,
+		Project:     "ProjA",
+		Destination: "/ucdata",
+	}, nil)
+
+	preflight := server.buildPreflightStatus(context.Background(), "ProjA", "/ucdata")
+
+	if preflight.Ready {
+		t.Fatalf("preflight.Ready = true, want false")
+	}
+
+	syncCheck := findPreflightCheck(t, preflight, "sync")
+	if syncCheck.Status != "blocked" {
+		t.Fatalf("sync check status = %q, want blocked", syncCheck.Status)
+	}
+	if preflight.ActiveProject != "ProjA" {
+		t.Fatalf("ActiveProject = %q, want ProjA", preflight.ActiveProject)
+	}
+}
+
+func TestHandleGetPreflightReturnsJSON(t *testing.T) {
+	t.Parallel()
+
+	server := newPreflightTestServer(models.SyncStatus{}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/preflight?project=ProjA&destination=%2Fucdata", nil)
+	resp := httptest.NewRecorder()
+
+	server.handleGetPreflight(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.Code)
+	}
+
+	var payload models.PreflightStatus
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if !payload.Ready {
+		t.Fatalf("payload.Ready = false, want true")
+	}
+	if payload.SelectedProject != "ProjA" {
+		t.Fatalf("SelectedProject = %q, want ProjA", payload.SelectedProject)
+	}
+}
+
+func newPreflightTestServer(status models.SyncStatus, mutate func(*Server)) *Server {
+	server := &Server{
+		cfg: &config.Config{},
+		getStatusFunc: func() models.SyncStatus {
+			return status
+		},
+		findProjectsFunc: func(context.Context) ([]models.ProjectInfo, error) {
+			return []models.ProjectInfo{{Name: "ProjA", Source: "WU01/E$"}}, nil
+		},
+		getDestinationsFunc: func() []models.DestinationInfo {
+			return []models.DestinationInfo{{Path: "/ucdata", Label: "USB-SSD Storage (default)", Type: "usb", FreeSpaceGB: 8, TotalGB: 16, IsDefault: true}}
+		},
+		checkSharesAvailability: func() []syncService.UnavailableShare { return nil },
+		ensureDestinationFunc:   func(string) error { return nil },
+		checkDiskSpaceFunc: func(string) (syncService.DiskSpaceCheckResult, error) {
+			return syncService.DiskSpaceCheckResult{
+				OK:                true,
+				FreeBytes:         8 * 1024 * 1024 * 1024,
+				RequiredFreeBytes: 1 * 1024 * 1024 * 1024,
+			}, nil
+		},
+	}
+
+	if mutate != nil {
+		mutate(server)
+	}
+
+	return server
+}
+
+func findPreflightCheck(t *testing.T, preflight models.PreflightStatus, key string) models.PreflightCheck {
+	t.Helper()
+
+	for _, check := range preflight.Checks {
+		if check.Key == key {
+			return check
+		}
+	}
+
+	t.Fatalf("preflight check %q not found", key)
+	return models.PreflightCheck{}
 }

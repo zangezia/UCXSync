@@ -5,12 +5,12 @@ class UCXSyncApp {
         this.reconnectInterval = 5000;
         this.dashboardPollInterval = 2000;
         this.dashboardTimer = null;
-        this.dashboardRefreshInFlight = false;
-        this.dashboardRefreshQueued = false;
         this.isRunning = false;
         this.mode = 'single';
         this.dashboardConfig = { enabled: false, instances: [] };
         this.lastOverview = null;
+        this.preflightReady = false;
+        this.preflightLoading = false;
 
         this.initElements();
         this.initEventListeners();
@@ -28,10 +28,14 @@ class UCXSyncApp {
                 this.loadDashboardDestinations(),
                 this.refreshDashboardOverview()
             ]);
+            this.dashboardTimer = setInterval(() => this.refreshDashboardOverview(), this.dashboardPollInterval);
         } else {
             this.connectWebSocket();
-            this.loadProjects();
-            this.loadDestinations();
+            await Promise.all([
+                this.loadProjects(),
+                this.loadDestinations()
+            ]);
+            await this.refreshPreflight({ silent: true });
         }
     }
 
@@ -55,6 +59,10 @@ class UCXSyncApp {
         this.mountSharesBtn = document.getElementById('mount-shares-btn');
         this.restartServiceBtn = document.getElementById('restart-service-btn');
         this.shutdownHostBtn = document.getElementById('shutdown-host-btn');
+        this.preflightPanel = document.getElementById('preflight-panel');
+        this.preflightSummary = document.getElementById('preflight-summary');
+        this.preflightBadge = document.getElementById('preflight-badge');
+        this.preflightChecks = document.getElementById('preflight-checks');
 
         // Status
         this.completedCapturesEl = document.getElementById('completed-captures');
@@ -115,14 +123,19 @@ class UCXSyncApp {
             }
         });
 
-        this.refreshBtn.addEventListener('click', () => {
+        this.refreshBtn.addEventListener('click', async () => {
             if (this.mode === 'dashboard') {
-                this.loadDashboardProjects();
-                this.loadDashboardDestinations();
-                this.refreshDashboardOverview();
+                await Promise.all([
+                    this.loadDashboardProjects(),
+                    this.loadDashboardDestinations(),
+                    this.refreshDashboardOverview()
+                ]);
             } else {
-                this.loadProjects();
-                this.loadDestinations();
+                await Promise.all([
+                    this.loadProjects(),
+                    this.loadDestinations()
+                ]);
+                await this.refreshPreflight({ silent: true }).catch(() => {});
             }
         });
 
@@ -159,8 +172,12 @@ class UCXSyncApp {
         this.projectSelect.addEventListener('change', () => {
             this.saveSettings();
             if (!this.isRunning) this.loadProjectStats();
+            if (this.mode !== 'dashboard') this.refreshPreflight({ silent: true }).catch(() => {});
         });
-        this.destinationSelect.addEventListener('change', () => this.saveSettings());
+        this.destinationSelect.addEventListener('change', () => {
+            this.saveSettings();
+            if (this.mode !== 'dashboard') this.refreshPreflight({ silent: true }).catch(() => {});
+        });
         this.parallelismInput.addEventListener('change', () => this.saveSettings());
         this.forceFullResyncCheckbox?.addEventListener('change', () => this.saveSettings());
     }
@@ -196,6 +213,9 @@ class UCXSyncApp {
                 <span class="indicator-label">${this.escapeHtml(inst.name)}</span>
             </div>`
         ).join('');
+        if (this.preflightPanel) {
+            this.preflightPanel.hidden = true;
+        }
         this.log('Общий дашборд включен', 'info');
     }
 
@@ -389,17 +409,18 @@ class UCXSyncApp {
             return;
         }
 
-        // Check shares availability before starting
         try {
-            const check = await this.fetchJSON('/api/shares/check');
-            if (!check.ok) {
-                const list = check.unavailable.map(u => `${u.node}/${u.share}`).join(', ');
-                this.log(`✗ Невозможно запустить: недоступны шары — ${list}`, 'error');
-                this.log('Используйте кнопку «Смонтировать шары» и повторите попытку', 'warn');
+            const preflight = await this.refreshPreflight({ silent: true });
+            if (!preflight?.ready) {
+                const blocker = (preflight?.checks || []).find(check => check.status !== 'ready');
+                this.log(`✗ Запуск заблокирован: ${blocker?.message || 'есть незавершённые проверки готовности'}`, 'error');
+                if ((preflight?.unavailable_shares || []).length > 0) {
+                    this.log('Используйте кнопку «Смонтировать шары» и повторите попытку', 'warn');
+                }
                 return;
             }
         } catch (e) {
-            this.log(`✗ Ошибка проверки шар: ${e.message}`, 'error');
+            this.log(`✗ Ошибка preflight-проверки: ${e.message}`, 'error');
             return;
         }
 
@@ -412,6 +433,7 @@ class UCXSyncApp {
 
             this.isRunning = true;
             this.updateControlsState();
+            this.refreshPreflight({ silent: true }).catch(() => {});
             if (forceFullResync) {
                 this.completedCapturesEl.textContent = 0;
                 this.testCapturesEl.textContent = 0;
@@ -465,6 +487,7 @@ class UCXSyncApp {
             this.isRunning = false;
             this.updateControlsState();
             this.log('✓ Синхронизация остановлена', 'info');
+            this.refreshPreflight({ silent: true }).catch(() => {});
         } catch (error) {
             this.log(`✗ Ошибка остановки: ${error.message}`, 'error');
         }
@@ -486,7 +509,8 @@ class UCXSyncApp {
     }
 
     updateControlsState() {
-        this.startBtn.disabled = this.isRunning;
+        const preflightBlocksStart = this.mode !== 'dashboard' && (!this.preflightReady || this.preflightLoading);
+        this.startBtn.disabled = this.isRunning || preflightBlocksStart;
         this.stopBtn.disabled = !this.isRunning;
         this.projectSelect.disabled = this.isRunning;
         this.destinationSelect.disabled = this.isRunning;
@@ -503,6 +527,7 @@ class UCXSyncApp {
             await this.fetchJSON('/api/shares/mount', { method: 'POST' });
             this.log('✓ Повторная попытка монтирования шар выполнена', 'success');
             await this.loadProjects();
+            await this.refreshPreflight({ silent: true });
         } catch (error) {
             this.log(`✗ Ошибка монтирования шар: ${error.message}`, 'error');
         } finally {
@@ -606,6 +631,102 @@ class UCXSyncApp {
         } catch (e) { /* ignore */ }
     }
 
+    async refreshPreflight({ silent = false } = {}) {
+        if (this.mode === 'dashboard' || !this.preflightPanel) {
+            return null;
+        }
+
+        const project = this.projectSelect.value;
+        const destination = this.getCurrentDestination();
+        const query = new URLSearchParams();
+        if (project) query.set('project', project);
+        if (destination) query.set('destination', destination);
+
+        this.preflightLoading = true;
+        this.preflightReady = false;
+        this.updateControlsState();
+        this.renderPreflightLoading();
+
+        try {
+            const preflight = await this.fetchJSON(`/api/preflight?${query.toString()}`);
+            this.renderPreflight(preflight);
+            return preflight;
+        } catch (error) {
+            this.renderPreflightError(error.message);
+            if (!silent) {
+                this.log(`✗ Ошибка проверки готовности: ${error.message}`, 'error');
+            }
+            throw error;
+        } finally {
+            this.preflightLoading = false;
+            this.updateControlsState();
+        }
+    }
+
+    renderPreflightLoading() {
+        if (!this.preflightBadge || !this.preflightChecks || !this.preflightSummary) {
+            return;
+        }
+
+        this.preflightBadge.className = 'preflight-badge loading';
+        this.preflightBadge.textContent = 'Проверка…';
+        this.preflightSummary.textContent = 'Обновляем сигналы готовности перед запуском.';
+        this.preflightChecks.innerHTML = '<li class="preflight-check preflight-loading">Проверяем проект, диск и сетевые шары…</li>';
+    }
+
+    renderPreflightError(message) {
+        this.preflightReady = false;
+        this.preflightBadge.className = 'preflight-badge blocked';
+        this.preflightBadge.textContent = 'Ошибка';
+        this.preflightSummary.textContent = 'Не удалось обновить панель готовности.';
+        this.preflightChecks.innerHTML = `
+            <li class="preflight-check blocked">
+                <div class="preflight-check-title"><span class="preflight-check-icon">✗</span><span>Preflight</span></div>
+                <div class="preflight-check-message">${this.escapeHtml(message)}</div>
+            </li>
+        `;
+    }
+
+    renderPreflight(preflight) {
+        const checks = Array.isArray(preflight.checks) ? preflight.checks : [];
+        this.preflightReady = !!preflight.ready;
+        this.preflightBadge.className = `preflight-badge ${preflight.ready ? 'ready' : 'blocked'}`;
+        this.preflightBadge.textContent = preflight.ready ? 'Готово' : 'Есть блокеры';
+
+        if (preflight.ready) {
+            this.preflightSummary.textContent = 'Все условия выполнены. Запуск синхронизации доступен.';
+        } else if (preflight.is_running) {
+            this.preflightSummary.textContent = 'Новый запуск заблокирован, пока текущая синхронизация не завершится.';
+        } else {
+            this.preflightSummary.textContent = 'Перед запуском нужно устранить отмеченные блокеры.';
+        }
+
+        this.preflightChecks.innerHTML = checks.map(check => {
+            const icon = check.status === 'ready' ? '✓' : '✗';
+            let extra = '';
+            if (check.key === 'shares' && Array.isArray(preflight.unavailable_shares) && preflight.unavailable_shares.length > 0) {
+                extra = `
+                    <div class="preflight-share-list">
+                        ${preflight.unavailable_shares.map(share => `
+                            <div class="preflight-share-item">${this.escapeHtml(`${share.node}/${share.share} — ${share.path}`)}</div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            return `
+                <li class="preflight-check ${this.escapeHtml(check.status)}">
+                    <div class="preflight-check-title">
+                        <span class="preflight-check-icon">${icon}</span>
+                        <span>${this.escapeHtml(check.label || check.key)}</span>
+                    </div>
+                    <div class="preflight-check-message">${this.escapeHtml(check.message || '')}</div>
+                    ${extra}
+                </li>
+            `;
+        }).join('');
+    }
+
     updateSingleStatus(status) {
         const wasRunning = this.isRunning;
         this.isRunning = status.is_running;
@@ -642,36 +763,12 @@ class UCXSyncApp {
         this.updateActiveOpsColor(status.active_file_operations || 0, status.max_parallelism || 0);
         this.updateActivityTable((status.active_tasks || []).map(task => ({ ...task, instance: '—' })));
         this.setIndicatorState('indicator-single-dot', status.is_running ? 'green' : 'yellow');
-    }
-
-    scheduleDashboardOverviewRefresh(delay = this.dashboardPollInterval) {
-        if (this.dashboardTimer) {
-            clearTimeout(this.dashboardTimer);
+        if (wasRunning !== this.isRunning && this.mode !== 'dashboard') {
+            this.refreshPreflight({ silent: true }).catch(() => {});
         }
-
-        this.dashboardTimer = setTimeout(() => {
-            this.dashboardTimer = null;
-            this.refreshDashboardOverview();
-        }, delay);
     }
 
     async refreshDashboardOverview() {
-        if (this.mode !== 'dashboard') {
-            return;
-        }
-
-        if (this.dashboardTimer) {
-            clearTimeout(this.dashboardTimer);
-            this.dashboardTimer = null;
-        }
-
-        if (this.dashboardRefreshInFlight) {
-            this.dashboardRefreshQueued = true;
-            return;
-        }
-
-        this.dashboardRefreshInFlight = true;
-
         try {
             const overview = await this.fetchJSON('/api/dashboard/overview');
             this.lastOverview = overview;
@@ -680,20 +777,6 @@ class UCXSyncApp {
         } catch (error) {
             this.updateConnectionStatus(false);
             this.log(`✗ Ошибка обновления общего дашборда: ${error.message}`, 'error');
-        } finally {
-            this.dashboardRefreshInFlight = false;
-
-            if (this.mode !== 'dashboard') {
-                return;
-            }
-
-            if (this.dashboardRefreshQueued) {
-                this.dashboardRefreshQueued = false;
-                queueMicrotask(() => this.refreshDashboardOverview());
-                return;
-            }
-
-            this.scheduleDashboardOverviewRefresh();
         }
     }
 
@@ -1094,6 +1177,7 @@ class UCXSyncApp {
                 await this.loadDashboardDestinations();
             } else {
                 await this.loadDestinations();
+                await this.refreshPreflight({ silent: true });
             }
         } catch (error) {
             this.log(`✗ Ошибка монтирования: ${error.message}`, 'error');
@@ -1114,6 +1198,7 @@ class UCXSyncApp {
                 await this.loadDashboardDestinations();
             } else {
                 await this.loadDestinations();
+                await this.refreshPreflight({ silent: true });
             }
         } catch (error) {
             this.log(`✗ Ошибка размонтирования: ${error.message}`, 'error');

@@ -37,21 +37,26 @@ const (
 
 // Server represents the web server
 type Server struct {
-	cfg                      *config.Config
-	syncService              *syncService.Service
-	monService               *monitor.Service
-	netService               *network.Service
-	serviceName              string
-	stateStore               *state.Store
-	webRoot                  string
-	httpClient               *http.Client
+	cfg         *config.Config
+	syncService *syncService.Service
+	monService  *monitor.Service
+	netService  *network.Service
+	serviceName string
+	stateStore  *state.Store
+	webRoot     string
+	httpClient  *http.Client
+
 	mountSharesFunc          func() error
 	checkSharesAvailability  func() []syncService.UnavailableShare
 	checkNetworkRequirements func() error
+	findProjectsFunc         func(context.Context) ([]models.ProjectInfo, error)
+	getDestinationsFunc      func() []models.DestinationInfo
+	getStatusFunc            func() models.SyncStatus
+	ensureDestinationFunc    func(string) error
+	checkDiskSpaceFunc       func(string) (syncService.DiskSpaceCheckResult, error)
 
-	mu        sync.RWMutex
-	clients   map[*websocket.Conn]bool
-	remountMu sync.Mutex
+	mu      sync.RWMutex
+	clients map[*websocket.Conn]bool
 }
 
 func getServiceName() string {
@@ -122,7 +127,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	netService.SetBaseMountDir(cfg.Network.MountRoot)
 	netService.SetMountOptions(cfg.Network.MountOptions)
 
-	return &Server{
+	server := &Server{
 		cfg:         cfg,
 		syncService: svc,
 		monService:  monService,
@@ -133,15 +138,28 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		mountSharesFunc:          netService.MountAll,
-		checkSharesAvailability:  svc.CheckSharesAvailability,
-		checkNetworkRequirements: network.CheckRequirements,
-		clients:                  make(map[*websocket.Conn]bool),
-	}, nil
+		clients: make(map[*websocket.Conn]bool),
+	}
+
+	server.mountSharesFunc = netService.MountAll
+	server.checkSharesAvailability = svc.CheckSharesAvailability
+	server.checkNetworkRequirements = network.CheckRequirements
+	server.findProjectsFunc = svc.FindProjects
+	server.getDestinationsFunc = server.getAvailableDestinations
+	server.getStatusFunc = svc.GetStatus
+	server.ensureDestinationFunc = svc.EnsureDestinationReady
+	server.checkDiskSpaceFunc = svc.CheckDiskSpace
+
+	return server, nil
 }
 
 // Start starts the web server
 func (s *Server) Start(ctx context.Context) error {
+	// Check network requirements
+	if err := s.requireNetworkRequirements(); err != nil {
+		log.Warn().Err(err).Msg("Network requirements check failed")
+	}
+
 	// Mount network shares
 	if err := s.mountAllShares(); err != nil {
 		log.Error().Err(err).Msg("Failed to mount network shares")
@@ -173,6 +191,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/project-stats", s.handleGetProjectStats)
 	mux.HandleFunc("/api/project/clear-history", s.handleClearProjectHistory)
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
+	mux.HandleFunc("/api/preflight", s.handleGetPreflight)
 	mux.HandleFunc("/api/sync/start", s.handleStartSync)
 	mux.HandleFunc("/api/sync/stop", s.handleStopSync)
 	mux.HandleFunc("/api/dashboard/project-stats", s.handleDashboardProjectStats)
@@ -227,82 +246,6 @@ func (s *Server) Start(ctx context.Context) error {
 	return server.Shutdown(shutdownCtx)
 }
 
-func (s *Server) checkNetworkReady() error {
-	if s.checkNetworkRequirements != nil {
-		return s.checkNetworkRequirements()
-	}
-
-	return network.CheckRequirements()
-}
-
-func (s *Server) mountAllShares() error {
-	s.remountMu.Lock()
-	defer s.remountMu.Unlock()
-
-	if err := s.checkNetworkReady(); err != nil {
-		return err
-	}
-
-	if s.mountSharesFunc != nil {
-		return s.mountSharesFunc()
-	}
-
-	if s.netService == nil {
-		return fmt.Errorf("network service is not configured")
-	}
-
-	return s.netService.MountAll()
-}
-
-func (s *Server) getUnavailableShares() []syncService.UnavailableShare {
-	if s.checkSharesAvailability != nil {
-		return s.checkSharesAvailability()
-	}
-
-	if s.syncService == nil {
-		return nil
-	}
-
-	return s.syncService.CheckSharesAvailability()
-}
-
-func (s *Server) autoRemountShares(ctx context.Context) {
-	interval := s.cfg.Sync.ServiceLoopInterval
-	if interval <= 0 {
-		interval = 10 * time.Second
-	}
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			unavailable := s.getUnavailableShares()
-			if len(unavailable) == 0 {
-				continue
-			}
-
-			if err := s.mountAllShares(); err != nil {
-				log.Warn().Err(err).Int("unavailable_shares", len(unavailable)).Msg("Automatic remount attempt failed")
-				continue
-			}
-
-			log.Info().Int("recovered_shares", len(unavailable)).Msg("Network shares remounted automatically")
-			s.broadcast(models.WSMessage{
-				Type: "log",
-				Payload: models.LogMessage{
-					Timestamp: time.Now(),
-					Level:     "info",
-					Message:   "Сетевые шары автоматически перемонтированы после восстановления сети",
-				},
-			})
-		}
-	}
-}
-
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	indexPath := filepath.Join(s.webRoot, "templates", "index.html")
 	http.ServeFile(w, r, indexPath)
@@ -317,7 +260,7 @@ func (s *Server) handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	projects, err := s.syncService.FindProjects(ctx)
+	projects, err := s.findProjects(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to find projects")
 		http.Error(w, "Failed to find projects", http.StatusInternalServerError)
@@ -346,10 +289,30 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := s.syncService.GetStatus()
+	status := s.currentSyncStatus()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+func (s *Server) handleGetPreflight(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.dashboardEnabled() {
+		http.Error(w, "Preflight is not available in dashboard mode", http.StatusNotFound)
+		return
+	}
+
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	destination := strings.TrimSpace(r.URL.Query().Get("destination"))
+
+	preflight := s.buildPreflightStatus(r.Context(), project, destination)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(preflight)
 }
 
 func (s *Server) handleGetProjectStats(w http.ResponseWriter, r *http.Request) {
@@ -533,7 +496,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Info().Str("remote", r.RemoteAddr).Msg("WebSocket client connected")
 
 	// Send initial status
-	status := s.syncService.GetStatus()
+	status := s.currentSyncStatus()
 	s.sendToClient(conn, models.WSMessage{
 		Type:    "status",
 		Payload: status,
@@ -597,7 +560,7 @@ func (s *Server) broadcastMetrics(ctx context.Context, metricsChan <-chan models
 			lastMetrics = metrics
 		case <-ticker.C:
 			// Broadcast status
-			status := s.syncService.GetStatus()
+			status := s.currentSyncStatus()
 			s.broadcast(models.WSMessage{
 				Type:    "status",
 				Payload: status,
@@ -838,6 +801,11 @@ func (s *Server) handleMountShares(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.requireNetworkRequirements(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if err := s.mountAllShares(); err != nil {
 		log.Error().Err(err).Msg("Failed to mount network shares on demand")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -963,6 +931,250 @@ func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.dashboardConfig())
+}
+
+func (s *Server) currentSyncStatus() models.SyncStatus {
+	if s.getStatusFunc != nil {
+		return s.getStatusFunc()
+	}
+	if s.syncService == nil {
+		return models.SyncStatus{}
+	}
+	return s.syncService.GetStatus()
+}
+
+func (s *Server) findProjects(ctx context.Context) ([]models.ProjectInfo, error) {
+	if s.findProjectsFunc != nil {
+		return s.findProjectsFunc(ctx)
+	}
+	if s.syncService == nil {
+		return nil, fmt.Errorf("sync service is not configured")
+	}
+	return s.syncService.FindProjects(ctx)
+}
+
+func (s *Server) availableDestinations() []models.DestinationInfo {
+	if s.getDestinationsFunc != nil {
+		return s.getDestinationsFunc()
+	}
+	return s.getAvailableDestinations()
+}
+
+func (s *Server) requireNetworkRequirements() error {
+	if s.checkNetworkRequirements != nil {
+		return s.checkNetworkRequirements()
+	}
+	return network.CheckRequirements()
+}
+
+func (s *Server) mountAllShares() error {
+	if s.mountSharesFunc != nil {
+		return s.mountSharesFunc()
+	}
+	if s.netService == nil {
+		return fmt.Errorf("network service is not configured")
+	}
+	return s.netService.MountAll()
+}
+
+func (s *Server) getUnavailableShares() []syncService.UnavailableShare {
+	if s.checkSharesAvailability != nil {
+		return s.checkSharesAvailability()
+	}
+	if s.syncService == nil {
+		return nil
+	}
+	return s.syncService.CheckSharesAvailability()
+}
+
+func (s *Server) ensureDestinationReady(destination string) error {
+	if s.ensureDestinationFunc != nil {
+		return s.ensureDestinationFunc(destination)
+	}
+	if s.syncService == nil {
+		return fmt.Errorf("sync service is not configured")
+	}
+	return s.syncService.EnsureDestinationReady(destination)
+}
+
+func (s *Server) checkDestinationDiskSpace(destination string) (syncService.DiskSpaceCheckResult, error) {
+	if s.checkDiskSpaceFunc != nil {
+		return s.checkDiskSpaceFunc(destination)
+	}
+	if s.syncService == nil {
+		return syncService.DiskSpaceCheckResult{}, fmt.Errorf("sync service is not configured")
+	}
+	return s.syncService.CheckDiskSpace(destination)
+}
+
+func (s *Server) autoRemountShares(ctx context.Context) {
+	interval := 10 * time.Second
+	if s.cfg != nil && s.cfg.Sync.ServiceLoopInterval > 0 {
+		interval = s.cfg.Sync.ServiceLoopInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			unavailable := s.getUnavailableShares()
+			if len(unavailable) == 0 {
+				continue
+			}
+
+			if err := s.requireNetworkRequirements(); err != nil {
+				log.Warn().Err(err).Msg("Skipping automatic share remount: requirements not met")
+				continue
+			}
+
+			if err := s.mountAllShares(); err != nil {
+				log.Warn().Err(err).Msg("Automatic share remount attempt failed")
+				continue
+			}
+		}
+	}
+}
+
+func (s *Server) buildPreflightStatus(ctx context.Context, project, destination string) models.PreflightStatus {
+	const gib = float64(1024 * 1024 * 1024)
+
+	status := s.currentSyncStatus()
+	preflight := models.PreflightStatus{
+		Ready:               true,
+		IsRunning:           status.IsRunning,
+		SelectedProject:     project,
+		SelectedDestination: destination,
+		ActiveProject:       status.Project,
+		ActiveDestination:   status.Destination,
+		Checks:              make([]models.PreflightCheck, 0, 5),
+	}
+
+	appendCheck := func(key, label, checkStatus, message string) {
+		preflight.Checks = append(preflight.Checks, models.PreflightCheck{
+			Key:     key,
+			Label:   label,
+			Status:  checkStatus,
+			Message: message,
+		})
+		if checkStatus != "ready" {
+			preflight.Ready = false
+		}
+	}
+
+	if status.IsRunning {
+		message := "Синхронизация уже выполняется"
+		if status.Project != "" || status.Destination != "" {
+			message = fmt.Sprintf("Синхронизация уже выполняется: %s → %s", status.Project, status.Destination)
+		}
+		appendCheck("sync", "Состояние службы", "blocked", message)
+	} else {
+		appendCheck("sync", "Состояние службы", "ready", "Служба готова к новому запуску")
+	}
+
+	projects, err := s.findProjects(ctx)
+	if err != nil {
+		appendCheck("project", "Проект", "blocked", "Не удалось получить список проектов")
+	} else {
+		preflight.AvailableProjects = len(projects)
+		projectFound := false
+		for _, candidate := range projects {
+			if candidate.Name == project {
+				projectFound = true
+				break
+			}
+		}
+
+		switch {
+		case len(projects) == 0:
+			appendCheck("project", "Проект", "blocked", "Доступные проекты не найдены")
+		case project == "":
+			appendCheck("project", "Проект", "blocked", "Выберите проект для синхронизации")
+		case !projectFound:
+			appendCheck("project", "Проект", "blocked", "Выбранный проект сейчас недоступен")
+		default:
+			appendCheck("project", "Проект", "ready", fmt.Sprintf("Проект '%s' выбран", project))
+		}
+	}
+
+	destinations := s.availableDestinations()
+	preflight.AvailableDestinations = len(destinations)
+	destinationFound := false
+	for _, candidate := range destinations {
+		if candidate.Path == destination {
+			destinationFound = true
+			preflight.FreeSpaceGB = candidate.FreeSpaceGB
+			break
+		}
+	}
+
+	switch {
+	case len(destinations) == 0:
+		appendCheck("destination", "Диск назначения", "blocked", "Доступные накопители не найдены")
+	case destination == "":
+		appendCheck("destination", "Диск назначения", "blocked", "Выберите накопитель назначения")
+	case !destinationFound:
+		appendCheck("destination", "Диск назначения", "blocked", "Выбранный накопитель сейчас недоступен")
+	default:
+		appendCheck("destination", "Диск назначения", "ready", fmt.Sprintf("Накопитель '%s' доступен", destination))
+	}
+
+	unavailableShares := s.getUnavailableShares()
+	if len(unavailableShares) > 0 {
+		preflight.UnavailableShares = make([]models.PreflightUnavailableShare, 0, len(unavailableShares))
+		for _, share := range unavailableShares {
+			preflight.UnavailableShares = append(preflight.UnavailableShares, models.PreflightUnavailableShare{
+				Node:  share.Node,
+				Share: share.Share,
+				Path:  share.Path,
+			})
+		}
+		appendCheck("shares", "Сетевые шары", "blocked", fmt.Sprintf("Недоступно сетевых шар: %d", len(unavailableShares)))
+	} else {
+		appendCheck("shares", "Сетевые шары", "ready", "Все сетевые шары доступны")
+	}
+
+	if destination == "" || !destinationFound {
+		appendCheck("mount", "Готовность пути", "blocked", "Путь назначения ещё не выбран")
+		appendCheck("disk", "Свободное место", "blocked", "Невозможно проверить место без выбранного накопителя")
+		return preflight
+	}
+
+	if err := s.ensureDestinationReady(destination); err != nil {
+		appendCheck("mount", "Готовность пути", "blocked", err.Error())
+	} else {
+		appendCheck("mount", "Готовность пути", "ready", "Путь назначения готов к записи")
+	}
+
+	diskCheck, err := s.checkDestinationDiskSpace(destination)
+	if err != nil {
+		appendCheck("disk", "Свободное место", "blocked", "Не удалось проверить свободное место")
+		return preflight
+	}
+
+	preflight.FreeSpaceGB = float64(diskCheck.FreeBytes) / gib
+	preflight.RequiredFreeSpaceGB = float64(diskCheck.RequiredFreeBytes) / gib
+
+	if !diskCheck.OK {
+		appendCheck(
+			"disk",
+			"Свободное место",
+			"blocked",
+			fmt.Sprintf("Свободно %.1f ГБ, требуется минимум %.1f ГБ", preflight.FreeSpaceGB, preflight.RequiredFreeSpaceGB),
+		)
+	} else {
+		appendCheck(
+			"disk",
+			"Свободное место",
+			"ready",
+			fmt.Sprintf("Свободно %.1f ГБ, минимальный запас %.1f ГБ", preflight.FreeSpaceGB, preflight.RequiredFreeSpaceGB),
+		)
+	}
+
+	return preflight
 }
 
 func (s *Server) handleDashboardOverview(w http.ResponseWriter, r *http.Request) {

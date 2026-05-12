@@ -178,6 +178,123 @@ h2 {
     font-weight: 500;
 }
 
+.preflight-panel {
+    margin-top: 18px;
+    padding: 16px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+.preflight-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.preflight-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.preflight-summary {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+}
+
+.preflight-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 112px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    background: rgba(33, 150, 243, 0.16);
+    color: var(--secondary-color);
+    border: 1px solid rgba(33, 150, 243, 0.25);
+}
+
+.preflight-badge.ready {
+    background: rgba(76, 175, 80, 0.18);
+    color: var(--success-color);
+    border-color: rgba(76, 175, 80, 0.35);
+}
+
+.preflight-badge.blocked {
+    background: rgba(244, 67, 54, 0.18);
+    color: var(--danger-color);
+    border-color: rgba(244, 67, 54, 0.35);
+}
+
+.preflight-badge.loading {
+    background: rgba(255, 152, 0, 0.18);
+    color: var(--warning-color);
+    border-color: rgba(255, 152, 0, 0.35);
+}
+
+.preflight-checks {
+    list-style: none;
+    display: grid;
+    gap: 10px;
+}
+
+.preflight-check {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.preflight-check.ready {
+    border-color: rgba(76, 175, 80, 0.28);
+}
+
+.preflight-check.blocked {
+    border-color: rgba(244, 67, 54, 0.3);
+}
+
+.preflight-check.preflight-loading {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.preflight-check-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+}
+
+.preflight-check-icon {
+    font-size: 1rem;
+}
+
+.preflight-check-message {
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+}
+
+.preflight-share-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.preflight-share-item {
+    font-size: 0.84rem;
+    color: var(--text-secondary);
+    word-break: break-word;
+}
+
 .input-group {
     display: flex;
     gap: 10px;
@@ -642,6 +759,11 @@ footer {
 
     .control-fields {
         width: 100%;
+    }
+
+    .preflight-header {
+        flex-direction: column;
+        align-items: stretch;
     }
 
     .control-buttons {
