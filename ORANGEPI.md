@@ -1,6 +1,6 @@
 # UCXSync на Orange Pi RV2
 
-Руководство по установке и настройке UCXSync на Orange Pi RV2 (RISC-V) с Ubuntu Server 24.04.
+Руководство по установке и настройке UCXSync на Orange Pi RV2 (RISC-V) с Ubuntu Server 24.04 для `riscv64`.
 
 ## 🍊 Характеристики Orange Pi RV2
 
@@ -15,7 +15,7 @@
 
 ### Системные требования
 
-- Ubuntu Server 24.04 LTS (ARM64)
+- Ubuntu Server 24.04 LTS (`riscv64`)
 - Минимум 2GB RAM (рекомендуется 4GB+)
 - Минимум 500MB свободного места для системы
 - Внешний USB 3.0 диск для хранения данных (рекомендуется)
@@ -336,8 +336,8 @@ sudo chown root:root /etc/ucxsync/config.yaml
 ```bash
 cd UCXSync
 git pull
-sudo make build-arm64
-sudo cp ucxsync-arm64 /opt/ucxsync/ucxsync
+sudo make build-riscv64
+sudo cp ucxsync-riscv64 /opt/ucxsync/ucxsync
 sudo systemctl restart ucxsync
 ```
 

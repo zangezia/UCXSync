@@ -30,10 +30,11 @@ sudo mkdir -p /ucmount
 ## Common commands
 
 ```bash
-sudo ucxsync check
-sudo ucxsync mount
-sudo ucxsync unmount
-sudo ucxsync --config /etc/ucxsync/config.yaml
+sudo /opt/ucxsync/ucxsync check --config /etc/ucxsync/config.yaml
+sudo /opt/ucxsync/ucxsync mount --config /etc/ucxsync/config.yaml
+sudo /opt/ucxsync/ucxsync unmount --config /etc/ucxsync/config.yaml
+sudo /opt/ucxsync/ucxsync --config /etc/ucxsync/config.yaml
+sudo systemctl restart ucxsync
 ```
 
 ## Typical config fragment

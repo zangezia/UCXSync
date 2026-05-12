@@ -1,151 +1,71 @@
-# UCXSync - Быстрый старт
+# UCXSync — краткое руководство на русском
 
-Инструкция по установке и запуску UCXSync.
+UCXSync — Linux-сервис для синхронизации файлов с UCX-узлов по CIFS/SMB на локальное хранилище с веб-интерфейсом мониторинга.
 
-## 📦 Что это?
+## Что умеет
 
-UCXSync - приложение для синхронизации файлов UCX с 14 сетевых узлов на локальный диск с веб-мониторингом в реальном времени.
+- подключать CIFS-шары UCX-узлов;
+- искать новые и изменённые файлы;
+- копировать данные параллельно в локальное хранилище;
+- показывать статус, логи и метрики в браузере.
 
-**Поддерживаемые платформы:**
-- ✅ **Linux AMD64/x86_64** - стандартные серверы → [LINUX.md](LINUX.md)
-- ✅ **Orange Pi RV2 (RISC-V 64-bit)** - основная SBC платформа → [ORANGEPI.md](ORANGEPI.md)
-- ✅ **ARM64 SBC** (Raspberry Pi, Orange Pi 5 и т.д.)
+## Поддерживаемая среда
 
-## 🚀 Быстрая установка
+- **ОС:** Linux
+- **Архитектуры:** AMD64, ARM64, RISC-V 64
+- **Права:** root / `sudo` для операций монтирования
+- **Зависимости:** `cifs-utils`, `mount`, `umount`, `lsblk`
 
-### 1. Подготовка системы
-
-```bash
-sudo apt update
-sudo apt install -y git cifs-utils
-```
-
-### 2. Клонирование и установка
+## Быстрый запуск
 
 ```bash
 git clone https://github.com/zangezia/UCXSync.git
 cd UCXSync
-sudo chmod +x install-orangepi.sh
-sudo ./install-orangepi.sh
-```
-
-### 3. Настройка
-
-```bash
+sudo ./install.sh
 sudo nano /etc/ucxsync/config.yaml
+sudo /opt/ucxsync/ucxsync check --config /etc/ucxsync/config.yaml
+sudo systemctl enable --now ucxsync
 ```
 
-Измените учетные данные:
-```yaml
-credentials:
-  username: ВашЛогин
-  password: ВашПароль
+После запуска откройте:
+
+```text
+http://localhost:8080
 ```
 
-### 4. Запуск
+## Где лежат основные файлы
+
+- бинарник: `/opt/ucxsync/ucxsync`
+- web assets: `/opt/ucxsync/web`
+- конфигурация: `/etc/ucxsync/config.yaml`
+- каталог монтирования шар: `/ucmount`
+- локальное хранилище: `/ucdata`
+
+## Часто используемые команды
 
 ```bash
-sudo systemctl start ucxsync
-sudo systemctl enable ucxsync  # автозапуск
-```
-
-### 5. Открыть веб-интерфейс
-
-```
-http://<IP-адрес-Orange-Pi>:8080
-```
-
-Узнать IP:
-```bash
-hostname -I
-```
-
-## 📚 Документация
-
-- **[ORANGEPI.md](ORANGEPI.md)** - Полное руководство для Orange Pi RV2
-- **[RISCV.md](RISCV.md)** - Оптимизация и особенности RISC-V архитектуры
-- **[README.md](README.md)** - Общая документация (English)
-- **[PARALLELISM.md](PARALLELISM.md)** - Управление параллелизмом
-- **[BUILD.md](BUILD.md)** - Сборка из исходников
-
-## ⚙️ Рекомендуемые настройки
-
-Для Orange Pi RV2 (RISC-V) уже настроено в `config.orangepi.yaml`:
-
-```yaml
-sync:
-  max_parallelism: 3  # Оптимально для RISC-V архитектуры
-```
-
-**Почему 3, а не 4?** RISC-V компилятор Go пока менее оптимизирован чем ARM. Подробнее: [RISCV.md](RISCV.md)
-
-## 🛠 Управление
-
-```bash
-# Статус
-sudo systemctl status ucxsync
-
-# Логи в реальном времени
-sudo journalctl -u ucxsync -f
-
-# Перезапуск
+sudo /opt/ucxsync/ucxsync check --config /etc/ucxsync/config.yaml
+sudo /opt/ucxsync/ucxsync mount --config /etc/ucxsync/config.yaml
+sudo /opt/ucxsync/ucxsync unmount --config /etc/ucxsync/config.yaml
 sudo systemctl restart ucxsync
-
-# Остановка
-sudo systemctl stop ucxsync
+sudo journalctl -u ucxsync -f
 ```
 
-## 🌡️ Мониторинг температуры
+## Карта документации
 
-```bash
-# Текущая температура CPU
-cat /sys/class/thermal/thermal_zone0/temp | awk '{print $1/1000 "°C"}'
-```
+- [`QUICKSTART.md`](QUICKSTART.md) — самый короткий путь до первого запуска
+- [`INSTALL.md`](INSTALL.md) — полная установка и варианты single / dual deployment
+- [`ORANGEPI.md`](ORANGEPI.md) — особенности Orange Pi RV2 и RISC-V
+- [`BUILD.md`](BUILD.md) — сборка для поддерживаемых архитектур
+- [`CHEATSHEET.md`](CHEATSHEET.md) — краткая шпаргалка по командам
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — устройство системы
+- [`PARALLELISM.md`](PARALLELISM.md) — настройки параллелизма
+- [`STORAGE-ARCHITECTURE.md`](STORAGE-ARCHITECTURE.md) — схема `/ucmount` и `/ucdata`
+- [`USB-SSD-GUIDE.md`](USB-SSD-GUIDE.md) — подготовка внешнего диска
+- [`UNINSTALL-GUIDE.md`](UNINSTALL-GUIDE.md) — корректное удаление
 
-**Важно:** При температуре > 75°C добавьте охлаждение!
+## Замечания
 
-## ⚡ Типичная производительность
-
-| Диск | Скорость (RISC-V) | CPU | Температура |
-|------|-------------------|-----|-------------|
-| USB 3.0 HDD | 25-35 MB/s | 25-35% | 40-50°C |
-| USB 3.0 SSD | 60-100 MB/s | 35-45% | 45-55°C |
-| NVMe SSD | 150-300 MB/s | 45-65% | 50-60°C |
-
-**Примечание:** RISC-V архитектура показывает немного меньшую производительность чем ARM из-за меньшей оптимизации компилятора Go.
-
-## 🆘 Проблемы?
-
-### Низкая скорость
-
-```yaml
-sync:
-  max_parallelism: 2  # Попробуйте снизить
-```
-
-### Высокая температура
-
-1. Установите вентилятор
-2. Снизите частоту обновлений:
-
-```yaml
-monitoring:
-  performance_update_interval: 5s
-  ui_update_interval: 10s
-```
-
-### Не монтируются сетевые диски
-
-```bash
-# Проверьте доступность узлов
-ping WU01
-
-# Проверьте учетные данные в config.yaml
-sudo nano /etc/ucxsync/config.yaml
-```
-
-## 📞 Поддержка
-
-Полная документация: [ORANGEPI.md](ORANGEPI.md)
-
-GitHub Issues: https://github.com/zangezia/UCXSync/issues
+- Полная функциональность зависит от Linux-специфичных механизмов монтирования и доступа к `/proc`.
+- Для установленной копии используйте `/opt/ucxsync/ucxsync`, а не просто `ucxsync`, если вы не добавляли бинарник в `PATH` вручную.
+- Каталог `cpp/` остаётся экспериментальным и не участвует в продакшн-рантайме.

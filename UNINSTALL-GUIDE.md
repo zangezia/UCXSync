@@ -1,194 +1,74 @@
-# 🗑️ Быстрое удаление UCXSync
+# Uninstalling UCXSync
 
-## Автоматическое удаление
+Use the repository uninstall script whenever possible: it understands single-instance, dual-instance, and full cleanup modes.
+
+## Preferred method
 
 ```bash
 cd UCXSync
-chmod +x uninstall.sh
-sudo ./uninstall.sh
+sudo ./uninstall.sh --single   # remove single-instance deployment
+sudo ./uninstall.sh --dual     # remove ucxsync@a + ucxsync@b deployment
+sudo ./uninstall.sh --all      # remove all deployments and shared files
 ```
 
-Скрипт спросит что удалять (конфигурацию, данные, зависимости).
+The script stops services, unmounts share trees, removes systemd units, and then asks whether to delete configuration, mount directories, shared files, and synchronized data.
 
----
+## Installed locations
 
-## Ручное быстрое удаление
+Current installer-managed paths are:
 
-### Полное удаление (всё!)
+- binary: `/opt/ucxsync/ucxsync`
+- web assets and helpers: `/opt/ucxsync/`
+- configuration: `/etc/ucxsync/`
+- logs: `/var/log/ucxsync/`
+- mount roots: `/ucmount`, `/ucmount-a`, `/ucmount-b`
+- synchronized data: `/ucdata`
+
+## What each uninstall mode removes
+
+### `--single`
+
+- stops and disables `ucxsync`
+- removes `/etc/systemd/system/ucxsync.service`
+- optionally removes `/etc/ucxsync/config.yaml`
+- optionally removes `/ucmount`
+
+### `--dual`
+
+- stops and disables `ucxsync@a`, `ucxsync@b`, and optional routing service
+- removes `/etc/systemd/system/ucxsync@.service`
+- optionally removes `/etc/ucxsync/a.yaml` and `/etc/ucxsync/b.yaml`
+- optionally removes `/ucmount-a` and `/ucmount-b`
+
+### `--all`
+
+- removes both single and dual deployments
+- optionally removes `/opt/ucxsync` and `/var/log/ucxsync`
+- optionally removes `/etc/ucxsync`
+- optionally removes `/ucdata`
+
+## Manual cleanup
+
+If you need a manual reset, use the current install paths rather than older `/usr/local/bin` examples.
 
 ```bash
-# Остановить сервис
-sudo systemctl stop ucxsync 2>/dev/null
-sudo systemctl disable ucxsync 2>/dev/null
-
-# Удалить файлы
-sudo rm -f /usr/local/bin/ucxsync
-sudo rm -rf /etc/ucxsync
-sudo rm -f /etc/systemd/system/ucxsync.service
-sudo rm -rf /ucdata/ucx
-sudo rm -rf /ucmount
-
-# Обновить systemd
+sudo systemctl stop ucxsync ucxsync@a ucxsync@b 2>/dev/null || true
+sudo systemctl disable ucxsync ucxsync@a ucxsync@b 2>/dev/null || true
+sudo rm -f /etc/systemd/system/ucxsync.service /etc/systemd/system/ucxsync@.service
+sudo rm -rf /opt/ucxsync /etc/ucxsync /var/log/ucxsync
+sudo rm -rf /ucmount /ucmount-a /ucmount-b
 sudo systemctl daemon-reload
-
-echo "✓ UCXSync полностью удалён"
 ```
 
-### Частичное удаление (сохранить конфиг и данные)
+Delete `/ucdata` only if you intentionally want to remove synchronized data.
+
+## Verify removal
 
 ```bash
-# Остановить сервис
-sudo systemctl stop ucxsync 2>/dev/null
-sudo systemctl disable ucxsync 2>/dev/null
-
-# Удалить только программу
-sudo rm -f /usr/local/bin/ucxsync
-sudo rm -f /etc/systemd/system/ucxsync.service
-
-# Обновить systemd
-sudo systemctl daemon-reload
-
-# Конфиг остаётся в /etc/ucxsync
-# Данные остаются в /ucdata/ucx
-
-echo "✓ UCXSync удалён (конфиг и данные сохранены)"
-```
-
-### Только сервис (для переустановки)
-
-```bash
-# Остановить сервис
-sudo systemctl stop ucxsync
-sudo systemctl disable ucxsync
-
-echo "✓ Сервис остановлен, файлы сохранены"
-```
-
----
-
-## Удаление только старой сборки перед обновлением
-
-```bash
-# Остановить сервис (но не отключать autostart)
-sudo systemctl stop ucxsync
-
-# Удалить старый бинарник
-sudo rm -f /usr/local/bin/ucxsync
-
-# Конфиг и данные остаются нетронутыми
-# Теперь можно делать новую сборку
-
-echo "✓ Готово к обновлению"
-```
-
-После этого можно установить новую версию:
-```bash
-cd UCXSync
-git pull
-make build
-sudo cp ucxsync /usr/local/bin/
-sudo systemctl start ucxsync
-```
-
----
-
-## Проверка что осталось
-
-```bash
-# Проверить бинарник
-ls -l /usr/local/bin/ucxsync
-
-# Проверить конфигурацию
-ls -l /etc/ucxsync/
-
-# Проверить данные
-du -sh /ucdata/ucx
-
-# Проверить сервис
 systemctl status ucxsync
-
-# Проверить процесс
-ps aux | grep ucxsync
+systemctl status ucxsync@a
+systemctl status ucxsync@b
+ls -la /opt/ucxsync
+ls -la /etc/ucxsync
+df -h /ucdata
 ```
-
----
-
-## Очистка всего (полный reset)
-
-```bash
-# Остановить всё
-sudo systemctl stop ucxsync 2>/dev/null
-sudo systemctl disable ucxsync 2>/dev/null
-
-# Размонтировать сетевые диски
-sudo umount /ucmount/* 2>/dev/null || true
-
-# Удалить всё
-sudo rm -f /usr/local/bin/ucxsync
-sudo rm -rf /etc/ucxsync
-sudo rm -f /etc/systemd/system/ucxsync.service
-sudo rm -rf /ucdata/ucx
-sudo rm -rf /ucmount
-sudo rm -rf /opt/ucxsync
-sudo rm -rf /var/log/ucxsync
-
-# Удалить исходники (если не нужны)
-cd ~ && rm -rf UCXSync
-
-# Обновить systemd
-sudo systemctl daemon-reload
-
-echo "✓ Полная очистка завершена"
-```
-
----
-
-## Быстрая переустановка
-
-```bash
-# 1. Удалить старую версию
-sudo systemctl stop ucxsync
-sudo rm -f /usr/local/bin/ucxsync
-
-# 2. Обновить код
-cd UCXSync
-git pull
-
-# 3. Пересобрать
-make build
-
-# 4. Установить
-sudo cp ucxsync /usr/local/bin/
-sudo systemctl start ucxsync
-
-# 5. Проверить
-systemctl status ucxsync
-```
-
----
-
-## Одна команда - всё удалить
-
-```bash
-sudo systemctl stop ucxsync 2>/dev/null; sudo systemctl disable ucxsync 2>/dev/null; sudo rm -f /usr/local/bin/ucxsync; sudo rm -rf /etc/ucxsync; sudo rm -f /etc/systemd/system/ucxsync.service; sudo rm -rf /ucdata/ucx; sudo rm -rf /ucmount; sudo systemctl daemon-reload; echo "✓ UCXSync удалён"
-```
-
----
-
-## Переустановка из нуля
-
-```bash
-# Полная очистка
-sudo systemctl stop ucxsync 2>/dev/null; sudo systemctl disable ucxsync 2>/dev/null; sudo rm -f /usr/local/bin/ucxsync; sudo rm -rf /etc/ucxsync; sudo rm -f /etc/systemd/system/ucxsync.service; sudo systemctl daemon-reload
-
-# Установка заново
-cd ~ && rm -rf UCXSync
-git clone https://github.com/zangezia/UCXSync.git
-cd UCXSync
-chmod +x QUICK-TEST.sh
-./QUICK-TEST.sh
-```
-
----
-
-**Важно:** Скрипт `QUICK-TEST.sh` теперь автоматически удаляет предыдущую установку перед новой!

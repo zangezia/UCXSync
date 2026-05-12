@@ -58,6 +58,15 @@ ucxsync unmount
 ucxsync check
 ```
 
+When running an installed copy, use the full binary path:
+
+```bash
+/opt/ucxsync/ucxsync
+/opt/ucxsync/ucxsync mount
+/opt/ucxsync/ucxsync unmount
+/opt/ucxsync/ucxsync check
+```
+
 Common flags:
 
 ```bash
@@ -235,14 +244,16 @@ See also: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Documentation map
 
-- [`README.ru.md`](README.ru.md) — quick start in Russian
-- [`LINUX.md`](LINUX.md) — Linux deployment notes
-- [`ORANGEPI.md`](ORANGEPI.md) — Orange Pi / RISC-V deployment
-- [`BUILD.md`](BUILD.md) — build instructions
-- [`TEST.md`](TEST.md) — testing guide
+- [`README.ru.md`](README.ru.md) — Russian overview and quick start
+- [`QUICKSTART.md`](QUICKSTART.md) — shortest path to first launch
+- [`INSTALL.md`](INSTALL.md) — full Linux installation and deployment guide
+- [`ORANGEPI.md`](ORANGEPI.md) — Orange Pi RV2 / RISC-V notes
+- [`BUILD.md`](BUILD.md) — build instructions for all supported architectures
+- [`CHEATSHEET.md`](CHEATSHEET.md) — day-to-day command reference
 - [`PARALLELISM.md`](PARALLELISM.md) — concurrency notes
 - [`USB-SSD-GUIDE.md`](USB-SSD-GUIDE.md) — external storage setup
 - [`STORAGE-ARCHITECTURE.md`](STORAGE-ARCHITECTURE.md) — mount and data layout
+- [`UNINSTALL-GUIDE.md`](UNINSTALL-GUIDE.md) — removal and cleanup
 
 ## Testing and verification
 
@@ -259,8 +270,8 @@ go build ./cmd/ucxsync
 
 ## Current limitations
 
-- free-space enforcement is not implemented yet in the sync service;
 - block-device and mount operations are Linux-specific and shell out to system tools;
+- mount and removable-storage workflows require root privileges and host-specific system configuration;
 - the C++ port is experimental and not part of the runtime path.
 
 ## Experimental C++ port

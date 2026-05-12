@@ -1,4 +1,6 @@
-# Building UCXSync for Orange Pi RV2 (RISC-V)
+# Building UCXSync
+
+This guide covers building UCXSync from source for the supported Linux targets: AMD64, ARM64, and RISC-V 64.
 
 ## Prerequisites
 
