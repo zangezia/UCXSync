@@ -5,6 +5,8 @@ class UCXSyncApp {
         this.reconnectInterval = 5000;
         this.dashboardPollInterval = 2000;
         this.dashboardTimer = null;
+        this.dashboardRefreshInFlight = false;
+        this.dashboardRefreshQueued = false;
         this.isRunning = false;
         this.mode = 'single';
         this.dashboardConfig = { enabled: false, instances: [] };
@@ -26,7 +28,6 @@ class UCXSyncApp {
                 this.loadDashboardDestinations(),
                 this.refreshDashboardOverview()
             ]);
-            this.dashboardTimer = setInterval(() => this.refreshDashboardOverview(), this.dashboardPollInterval);
         } else {
             this.connectWebSocket();
             this.loadProjects();
@@ -643,7 +644,34 @@ class UCXSyncApp {
         this.setIndicatorState('indicator-single-dot', status.is_running ? 'green' : 'yellow');
     }
 
+    scheduleDashboardOverviewRefresh(delay = this.dashboardPollInterval) {
+        if (this.dashboardTimer) {
+            clearTimeout(this.dashboardTimer);
+        }
+
+        this.dashboardTimer = setTimeout(() => {
+            this.dashboardTimer = null;
+            this.refreshDashboardOverview();
+        }, delay);
+    }
+
     async refreshDashboardOverview() {
+        if (this.mode !== 'dashboard') {
+            return;
+        }
+
+        if (this.dashboardTimer) {
+            clearTimeout(this.dashboardTimer);
+            this.dashboardTimer = null;
+        }
+
+        if (this.dashboardRefreshInFlight) {
+            this.dashboardRefreshQueued = true;
+            return;
+        }
+
+        this.dashboardRefreshInFlight = true;
+
         try {
             const overview = await this.fetchJSON('/api/dashboard/overview');
             this.lastOverview = overview;
@@ -652,6 +680,20 @@ class UCXSyncApp {
         } catch (error) {
             this.updateConnectionStatus(false);
             this.log(`✗ Ошибка обновления общего дашборда: ${error.message}`, 'error');
+        } finally {
+            this.dashboardRefreshInFlight = false;
+
+            if (this.mode !== 'dashboard') {
+                return;
+            }
+
+            if (this.dashboardRefreshQueued) {
+                this.dashboardRefreshQueued = false;
+                queueMicrotask(() => this.refreshDashboardOverview());
+                return;
+            }
+
+            this.scheduleDashboardOverviewRefresh();
         }
     }
 

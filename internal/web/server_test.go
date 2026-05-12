@@ -1,10 +1,15 @@
 package web
 
 import (
+	"context"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/zangezia/UCXSync/internal/config"
 	"github.com/zangezia/UCXSync/internal/state"
+	syncService "github.com/zangezia/UCXSync/internal/sync"
 	"github.com/zangezia/UCXSync/pkg/models"
 )
 
@@ -182,5 +187,53 @@ func TestBuildDashboardSummaryUsesLatestTestCaptureAsCommonLastCapture(t *testin
 	}
 	if summary.TotalCompletedTest != 1 {
 		t.Fatalf("TotalCompletedTest = %d, want 1", summary.TotalCompletedTest)
+	}
+}
+
+func TestAutoRemountSharesRetriesWhenSharesUnavailable(t *testing.T) {
+	t.Parallel()
+
+	var mountCalls atomic.Int32
+	mounted := atomic.Bool{}
+	server := &Server{
+		cfg:                      &config.Config{Sync: config.Sync{ServiceLoopInterval: 10 * time.Millisecond}},
+		checkNetworkRequirements: func() error { return nil },
+		checkSharesAvailability: func() []syncService.UnavailableShare {
+			if mounted.Load() {
+				return nil
+			}
+			return []syncService.UnavailableShare{{Node: "WU01", Share: "E$", Path: "/ucmount/WU01/E"}}
+		},
+		mountSharesFunc: func() error {
+			mountCalls.Add(1)
+			mounted.Store(true)
+			return nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		server.autoRemountShares(ctx)
+		close(done)
+	}()
+
+	deadline := time.After(500 * time.Millisecond)
+	for mountCalls.Load() == 0 {
+		select {
+		case <-deadline:
+			cancel()
+			t.Fatal("expected automatic remount attempt")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("autoRemountShares did not stop after context cancellation")
 	}
 }

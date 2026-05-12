@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/zangezia/UCXSync/internal/state"
 )
 
@@ -306,6 +307,35 @@ func TestTrackTestCaptureCompletionWithoutMetadataAndRawQv(t *testing.T) {
 	}
 }
 
+func TestTrackTestCaptureCompletionWithoutMetadataAndRawQvInMemory(t *testing.T) {
+	t.Parallel()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount-a")
+	svc.mu.Lock()
+	svc.requiredSensors = map[string]struct{}{"00-00": {}, "00-01": {}}
+	svc.mu.Unlock()
+
+	if err := svc.trackCaptureCompletion("Lvl0X-00013-T-ProjTest-00-00-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", "WU01"); err != nil {
+		t.Fatalf("first RAW track failed: %v", err)
+	}
+	if err := svc.trackCaptureCompletion("Lvl0X-00013-T-ProjTest-00-01-ABCDEF01_2345_6789_ABCD_EF0123456789.raw", "WU02"); err != nil {
+		t.Fatalf("second RAW track failed: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&svc.completedTestCaptures); got != 1 {
+		t.Fatalf("completedTestCaptures = %d, want 1", got)
+	}
+	if got := atomic.LoadInt32(&svc.completedCaptures); got != 0 {
+		t.Fatalf("completedCaptures = %d, want 0", got)
+	}
+	if svc.lastTestCaptureNumber != "00013" {
+		t.Fatalf("lastTestCaptureNumber = %q, want 00013", svc.lastTestCaptureNumber)
+	}
+	if _, exists := svc.captureTracker["00013"]; exists {
+		t.Fatal("expected completed in-memory test capture to be removed from tracker")
+	}
+}
+
 func TestTrackTestCaptureCompletionWithProvidedFilenamePattern(t *testing.T) {
 	t.Parallel()
 
@@ -393,6 +423,198 @@ func TestShouldCopyFileSkipsFilesMarkedCopiedInStateStore(t *testing.T) {
 	svc.mu.Unlock()
 	if shouldCopy := svc.shouldCopyFile(sourceFile, sourceRoot, destRoot); !shouldCopy {
 		t.Fatal("expected full resync mode to force re-copy of DB-marked file")
+	}
+}
+
+func TestShouldCopyFileReconcilesPersistedStateForExistingDestinationFile(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	sourceRoot := filepath.Join(baseDir, "source")
+	destRoot := filepath.Join(baseDir, "dest")
+	if err := os.MkdirAll(sourceRoot, 0755); err != nil {
+		t.Fatalf("failed to create source root: %v", err)
+	}
+	if err := os.MkdirAll(destRoot, 0755); err != nil {
+		t.Fatalf("failed to create destination root: %v", err)
+	}
+
+	store, err := state.New(filepath.Join(baseDir, "state.db"), "ucxsync-test")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount")
+	if err := svc.SetStateStore(store); err != nil {
+		t.Fatalf("SetStateStore returned error: %v", err)
+	}
+	svc.mu.Lock()
+	svc.project = "ProjA"
+	svc.requiredSensors = map[string]struct{}{"00-00": {}}
+	svc.mu.Unlock()
+
+	filename := "Lvl0X-00001-T-ProjA-00-00-ABCDEF01_2345_6789_ABCD_EF0123456789.raw"
+	sourceFile := filepath.Join(sourceRoot, filename)
+	content := []byte("payload")
+	if err := os.WriteFile(sourceFile, content, 0644); err != nil {
+		t.Fatalf("failed to create source file: %v", err)
+	}
+	sourceInfo, err := os.Stat(sourceFile)
+	if err != nil {
+		t.Fatalf("failed to stat source file: %v", err)
+	}
+
+	destFile := filepath.Join(destRoot, filename)
+	if err := os.WriteFile(destFile, content, 0644); err != nil {
+		t.Fatalf("failed to create destination file: %v", err)
+	}
+	if err := os.Chtimes(destFile, sourceInfo.ModTime(), sourceInfo.ModTime()); err != nil {
+		t.Fatalf("failed to sync destination timestamps: %v", err)
+	}
+
+	if shouldCopy := svc.shouldCopyFile(sourceFile, sourceRoot, destRoot); shouldCopy {
+		t.Fatal("expected shouldCopyFile to reconcile persisted state instead of re-copying matching file")
+	}
+
+	copied, err := store.IsFileCopied("ProjA", filename, sourceInfo.Size(), sourceInfo.ModTime())
+	if err != nil {
+		t.Fatalf("IsFileCopied returned error: %v", err)
+	}
+	if !copied {
+		t.Fatal("expected reconcile path to persist copied file state")
+	}
+
+	status, err := store.LoadProjectStatus("ProjA")
+	if err != nil {
+		t.Fatalf("LoadProjectStatus returned error: %v", err)
+	}
+	if status.CompletedTestCaptures != 1 {
+		t.Fatalf("CompletedTestCaptures = %d, want 1 after reconcile", status.CompletedTestCaptures)
+	}
+	if status.LastTestCaptureNumber != "00001" {
+		t.Fatalf("LastTestCaptureNumber = %q, want 00001", status.LastTestCaptureNumber)
+	}
+}
+
+func TestCheckDiskSpaceBlocksLowFreeSpace(t *testing.T) {
+	t.Parallel()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount")
+	svc.SetDiskSpaceThresholds(100, 50)
+	svc.diskUsage = func(path string) (*disk.UsageStat, error) {
+		return &disk.UsageStat{Free: 149}, nil
+	}
+
+	if svc.checkDiskSpace("/tmp") {
+		t.Fatal("expected checkDiskSpace to block when free space is below threshold plus safety margin")
+	}
+}
+
+func TestCheckDiskSpaceAllowsSufficientFreeSpace(t *testing.T) {
+	t.Parallel()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount")
+	svc.SetDiskSpaceThresholds(100, 50)
+	svc.diskUsage = func(path string) (*disk.UsageStat, error) {
+		return &disk.UsageStat{Free: 150}, nil
+	}
+
+	if !svc.checkDiskSpace("/tmp") {
+		t.Fatal("expected checkDiskSpace to allow sync when free space satisfies threshold")
+	}
+}
+
+func TestSyncLoopRunsImmediateIterationBeforeTicker(t *testing.T) {
+	t.Parallel()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount")
+	svc.SetServiceLoopInterval(time.Hour)
+
+	iterationStarted := make(chan struct{}, 1)
+	releaseIteration := make(chan struct{})
+	svc.syncIterationFunc = func(ctx context.Context, destDir string) {
+		select {
+		case iterationStarted <- struct{}{}:
+		default:
+		}
+
+		<-releaseIteration
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	svc.wg.Add(1)
+
+	done := make(chan struct{})
+	go func() {
+		svc.syncLoop(ctx, "/tmp/dest")
+		close(done)
+	}()
+
+	select {
+	case <-iterationStarted:
+	case <-time.After(200 * time.Millisecond):
+		close(releaseIteration)
+		cancel()
+		t.Fatal("expected syncLoop to run an immediate iteration before waiting for ticker")
+	}
+
+	close(releaseIteration)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("syncLoop did not exit after context cancellation")
+	}
+}
+
+func TestCheckSharesAvailabilityReportsUnmountedShare(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mountPoint := filepath.Join(root, "WU01", "E")
+	if err := os.MkdirAll(mountPoint, 0755); err != nil {
+		t.Fatalf("failed to create mount point: %v", err)
+	}
+
+	svc := New([]string{"WU01"}, []string{"E$"}, root)
+	svc.mountPointMounted = func(path string) (bool, error) {
+		if path != mountPoint {
+			t.Fatalf("mountPointMounted called with %q, want %q", path, mountPoint)
+		}
+		return false, nil
+	}
+
+	unavailable := svc.CheckSharesAvailability()
+	if len(unavailable) != 1 {
+		t.Fatalf("expected 1 unavailable share, got %d", len(unavailable))
+	}
+	if unavailable[0].Path != mountPoint {
+		t.Fatalf("unavailable path = %q, want %q", unavailable[0].Path, mountPoint)
+	}
+}
+
+func TestCheckSharesAvailabilityAcceptsMountedShare(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mountPoint := filepath.Join(root, "WU01", "E")
+	if err := os.MkdirAll(mountPoint, 0755); err != nil {
+		t.Fatalf("failed to create mount point: %v", err)
+	}
+
+	svc := New([]string{"WU01"}, []string{"E$"}, root)
+	svc.mountPointMounted = func(path string) (bool, error) {
+		if path != mountPoint {
+			t.Fatalf("mountPointMounted called with %q, want %q", path, mountPoint)
+		}
+		return true, nil
+	}
+
+	unavailable := svc.CheckSharesAvailability()
+	if len(unavailable) != 0 {
+		t.Fatalf("expected all shares to be available, got %d unavailable", len(unavailable))
 	}
 }
 

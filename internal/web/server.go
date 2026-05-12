@@ -37,17 +37,21 @@ const (
 
 // Server represents the web server
 type Server struct {
-	cfg         *config.Config
-	syncService *syncService.Service
-	monService  *monitor.Service
-	netService  *network.Service
-	serviceName string
-	stateStore  *state.Store
-	webRoot     string
-	httpClient  *http.Client
+	cfg                      *config.Config
+	syncService              *syncService.Service
+	monService               *monitor.Service
+	netService               *network.Service
+	serviceName              string
+	stateStore               *state.Store
+	webRoot                  string
+	httpClient               *http.Client
+	mountSharesFunc          func() error
+	checkSharesAvailability  func() []syncService.UnavailableShare
+	checkNetworkRequirements func() error
 
-	mu      sync.RWMutex
-	clients map[*websocket.Conn]bool
+	mu        sync.RWMutex
+	clients   map[*websocket.Conn]bool
+	remountMu sync.Mutex
 }
 
 func getServiceName() string {
@@ -95,6 +99,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		cfg.Shares,
 		cfg.Network.MountRoot,
 	)
+	svc.SetServiceLoopInterval(cfg.Sync.ServiceLoopInterval)
+	svc.SetDiskSpaceThresholds(cfg.Sync.MinFreeDiskSpace, cfg.Sync.DiskSpaceSafetyMargin)
 	if err := svc.SetStateStore(store); err != nil {
 		store.Close()
 		return nil, err
@@ -127,25 +133,24 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		clients: make(map[*websocket.Conn]bool),
+		mountSharesFunc:          netService.MountAll,
+		checkSharesAvailability:  svc.CheckSharesAvailability,
+		checkNetworkRequirements: network.CheckRequirements,
+		clients:                  make(map[*websocket.Conn]bool),
 	}, nil
 }
 
 // Start starts the web server
 func (s *Server) Start(ctx context.Context) error {
-	// Check network requirements
-	if err := network.CheckRequirements(); err != nil {
-		log.Warn().Err(err).Msg("Network requirements check failed")
-	}
-
 	// Mount network shares
-	if err := s.netService.MountAll(); err != nil {
+	if err := s.mountAllShares(); err != nil {
 		log.Error().Err(err).Msg("Failed to mount network shares")
 	}
 
 	// Start performance monitoring
 	metricsChan := s.monService.Start(ctx)
 	go s.broadcastMetrics(ctx, metricsChan)
+	go s.autoRemountShares(ctx)
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -220,6 +225,82 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	return server.Shutdown(shutdownCtx)
+}
+
+func (s *Server) checkNetworkReady() error {
+	if s.checkNetworkRequirements != nil {
+		return s.checkNetworkRequirements()
+	}
+
+	return network.CheckRequirements()
+}
+
+func (s *Server) mountAllShares() error {
+	s.remountMu.Lock()
+	defer s.remountMu.Unlock()
+
+	if err := s.checkNetworkReady(); err != nil {
+		return err
+	}
+
+	if s.mountSharesFunc != nil {
+		return s.mountSharesFunc()
+	}
+
+	if s.netService == nil {
+		return fmt.Errorf("network service is not configured")
+	}
+
+	return s.netService.MountAll()
+}
+
+func (s *Server) getUnavailableShares() []syncService.UnavailableShare {
+	if s.checkSharesAvailability != nil {
+		return s.checkSharesAvailability()
+	}
+
+	if s.syncService == nil {
+		return nil
+	}
+
+	return s.syncService.CheckSharesAvailability()
+}
+
+func (s *Server) autoRemountShares(ctx context.Context) {
+	interval := s.cfg.Sync.ServiceLoopInterval
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			unavailable := s.getUnavailableShares()
+			if len(unavailable) == 0 {
+				continue
+			}
+
+			if err := s.mountAllShares(); err != nil {
+				log.Warn().Err(err).Int("unavailable_shares", len(unavailable)).Msg("Automatic remount attempt failed")
+				continue
+			}
+
+			log.Info().Int("recovered_shares", len(unavailable)).Msg("Network shares remounted automatically")
+			s.broadcast(models.WSMessage{
+				Type: "log",
+				Payload: models.LogMessage{
+					Timestamp: time.Now(),
+					Level:     "info",
+					Message:   "Сетевые шары автоматически перемонтированы после восстановления сети",
+				},
+			})
+		}
+	}
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -383,7 +464,7 @@ func (s *Server) handleStartSync(w http.ResponseWriter, r *http.Request) {
 	s.monService.SetTargetDisk(req.Destination)
 
 	// Check that all shares are mounted and accessible
-	if unavailable := s.syncService.CheckSharesAvailability(); len(unavailable) > 0 {
+	if unavailable := s.getUnavailableShares(); len(unavailable) > 0 {
 		var missing []string
 		for _, u := range unavailable {
 			missing = append(missing, fmt.Sprintf("%s/%s (%s)", u.Node, u.Share, u.Path))
@@ -730,7 +811,7 @@ func (s *Server) handleCheckShares(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	unavailable := s.syncService.CheckSharesAvailability()
+	unavailable := s.getUnavailableShares()
 
 	type shareStatus struct {
 		Node  string `json:"node"`
@@ -757,12 +838,7 @@ func (s *Server) handleMountShares(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := network.CheckRequirements(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := s.netService.MountAll(); err != nil {
+	if err := s.mountAllShares(); err != nil {
 		log.Error().Err(err).Msg("Failed to mount network shares on demand")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

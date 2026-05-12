@@ -33,6 +33,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,18 +46,20 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/zangezia/UCXSync/internal/state"
 	"github.com/zangezia/UCXSync/pkg/models"
 )
 
 // Service handles file synchronization operations
 type Service struct {
-	nodes           []string
-	shares          []string
-	baseMountDir    string // Base directory for mounted shares (e.g., /ucmount)
-	requiredSensors map[string]struct{}
-	stateStore      *state.Store
-	forceFullResync bool
+	nodes             []string
+	shares            []string
+	baseMountDir      string // Base directory for mounted shares (e.g., /ucmount)
+	requiredSensors   map[string]struct{}
+	stateStore        *state.Store
+	forceFullResync   bool
+	mountPointMounted func(string) (bool, error)
 
 	mu                    sync.RWMutex
 	isRunning             bool
@@ -70,6 +73,11 @@ type Service struct {
 	completedTestCaptures int32
 	lastCaptureNumber     string
 	lastTestCaptureNumber string
+	serviceLoopInterval   time.Duration
+	minFreeDiskSpace      int64
+	diskSpaceSafetyMargin int64
+	diskUsage             func(path string) (*disk.UsageStat, error)
+	syncIterationFunc     func(context.Context, string)
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -120,7 +128,12 @@ var (
 	rawQvRegex = regexp.MustCompile(`^RawQv-(\d+)(?:-(T))?-(.+)-([A-F0-9_]+)\.dat$`)
 )
 
-const defaultDataMountPoint = "/ucdata"
+const (
+	defaultDataMountPoint        = "/ucdata"
+	defaultServiceLoopInterval   = 10 * time.Second
+	defaultMinFreeDiskSpace      = 50 * 1024 * 1024
+	defaultDiskSpaceSafetyMargin = 100 * 1024 * 1024
+)
 
 // New creates a new sync service
 func New(nodes, shares []string, baseMountDir string) *Service {
@@ -134,13 +147,47 @@ func New(nodes, shares []string, baseMountDir string) *Service {
 	}
 
 	return &Service{
-		nodes:           nodes,
-		shares:          shares,
-		baseMountDir:    baseMountDir,
-		requiredSensors: requiredSensors,
-		activeTasks:     make(map[string]*taskInfo),
-		captureTracker:  make(map[string]map[string]bool),
+		nodes:                 nodes,
+		shares:                shares,
+		baseMountDir:          baseMountDir,
+		requiredSensors:       requiredSensors,
+		mountPointMounted:     isMountPointMounted,
+		activeTasks:           make(map[string]*taskInfo),
+		captureTracker:        make(map[string]map[string]bool),
+		serviceLoopInterval:   defaultServiceLoopInterval,
+		minFreeDiskSpace:      defaultMinFreeDiskSpace,
+		diskSpaceSafetyMargin: defaultDiskSpaceSafetyMargin,
+		diskUsage:             disk.Usage,
 	}
+}
+
+// SetServiceLoopInterval overrides the background sync polling interval.
+func (s *Service) SetServiceLoopInterval(interval time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if interval <= 0 {
+		s.serviceLoopInterval = defaultServiceLoopInterval
+		return
+	}
+
+	s.serviceLoopInterval = interval
+}
+
+// SetDiskSpaceThresholds configures the minimum free space and extra safety margin.
+func (s *Service) SetDiskSpaceThresholds(minFreeBytes, safetyMarginBytes int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if minFreeBytes < 0 {
+		minFreeBytes = 0
+	}
+	if safetyMarginBytes < 0 {
+		safetyMarginBytes = 0
+	}
+
+	s.minFreeDiskSpace = minFreeBytes
+	s.diskSpaceSafetyMargin = safetyMarginBytes
 }
 
 // SetStateStore enables persistent SQLite-backed state for the service.
@@ -406,6 +453,16 @@ func (s *Service) CheckSharesAvailability() []UnavailableShare {
 					Share: share,
 					Path:  mountPoint,
 				})
+				continue
+			}
+
+			mounted, err := s.mountPointMounted(mountPoint)
+			if err != nil || !mounted {
+				unavailable = append(unavailable, UnavailableShare{
+					Node:  node,
+					Share: share,
+					Path:  mountPoint,
+				})
 			}
 		}
 	}
@@ -486,17 +543,44 @@ func (s *Service) FindProjects(ctx context.Context) ([]models.ProjectInfo, error
 func (s *Service) syncLoop(ctx context.Context, destDir string) {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(10 * time.Second)
+	interval := s.loopInterval()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	s.runSyncIteration(ctx, destDir)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.syncIteration(ctx, destDir)
+			s.runSyncIteration(ctx, destDir)
 		}
 	}
+}
+
+func (s *Service) loopInterval() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.serviceLoopInterval <= 0 {
+		return defaultServiceLoopInterval
+	}
+
+	return s.serviceLoopInterval
+}
+
+func (s *Service) runSyncIteration(ctx context.Context, destDir string) {
+	s.mu.RLock()
+	iterationFn := s.syncIterationFunc
+	s.mu.RUnlock()
+
+	if iterationFn != nil {
+		iterationFn(ctx, destDir)
+		return
+	}
+
+	s.syncIteration(ctx, destDir)
 }
 
 func (s *Service) syncIteration(ctx context.Context, destDir string) {
@@ -730,6 +814,13 @@ func (s *Service) shouldCopyFile(sourcePath, sourceRoot, destRoot string) bool {
 		return true
 	}
 
+	if store != nil && !forceFullResync {
+		if err := s.reconcilePersistedFileState(sourcePath, relPath, sourceInfo); err != nil {
+			log.Warn().Err(err).Str("file", relPath).Msg("Failed to reconcile persisted file state")
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -772,7 +863,8 @@ func (s *Service) copyFile(ctx context.Context, task *taskInfo, sourcePath, sour
 	}
 
 	// Preserve timestamps
-	if info, err := src.Stat(); err == nil {
+	info, statErr := src.Stat()
+	if statErr == nil {
 		os.Chtimes(destPath, info.ModTime(), info.ModTime())
 	}
 
@@ -782,26 +874,71 @@ func (s *Service) copyFile(ctx context.Context, task *taskInfo, sourcePath, sour
 	task.lastActivity = time.Now()
 
 	s.mu.RLock()
-	project := s.project
-	store := s.stateStore
 	s.mu.RUnlock()
-	if store != nil {
-		if info, err := src.Stat(); err == nil {
-			if err := store.MarkFileCopied(project, relPath, info.Size(), info.ModTime()); err != nil {
-				log.Error().Err(err).Str("file", relPath).Msg("Failed to persist copied file state")
-			}
-		}
+	if statErr != nil {
+		return statErr
 	}
 
-	// Track capture completion
-	s.trackCaptureCompletion(filepath.Base(sourcePath), task.node)
+	if err := s.persistCopiedFileState(sourcePath, relPath, info, task.node); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (s *Service) trackCaptureCompletion(filename, node string) {
+func (s *Service) persistCopiedFileState(sourcePath, relPath string, info os.FileInfo, node string) error {
+	s.mu.RLock()
+	project := s.project
+	store := s.stateStore
+	s.mu.RUnlock()
+
+	if store == nil {
+		return s.trackCaptureCompletion(filepath.Base(sourcePath), node)
+	}
+
+	var errs []error
+	if err := s.trackCaptureCompletion(filepath.Base(sourcePath), node); err != nil {
+		errs = append(errs, err)
+	}
+	if err := store.MarkFileCopied(project, relPath, info.Size(), info.ModTime()); err != nil {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
+}
+
+func (s *Service) reconcilePersistedFileState(sourcePath, relPath string, info os.FileInfo) error {
+	s.mu.RLock()
+	store := s.stateStore
+	project := s.project
+	s.mu.RUnlock()
+
+	if store == nil {
+		return nil
+	}
+
+	var errs []error
+	if err := store.MarkFileCopied(project, relPath, info.Size(), info.ModTime()); err != nil {
+		errs = append(errs, err)
+	}
+	if err := s.trackCaptureCompletion(filepath.Base(sourcePath), ""); err != nil {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
+}
+
+func (s *Service) trackCaptureCompletion(filename, node string) error {
 	if len(s.requiredSensors) == 0 {
-		return
+		return nil
 	}
 
 	// Try to parse as RAW file first
@@ -812,13 +949,13 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		if info == nil {
 			info = parseRawQvFileName(filename)
 			if info == nil {
-				return
+				return nil
 			}
 		}
 	}
 
 	if info.CaptureNumber == "" {
-		return
+		return nil
 	}
 
 	s.mu.RLock()
@@ -834,7 +971,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		case ".raw":
 			sensorCode := strings.TrimSpace(info.SensorCode)
 			if _, ok := s.requiredSensors[sensorCode]; !ok {
-				return
+				return nil
 			}
 			fileKey = fmt.Sprintf("raw:%s", sensorCode)
 		case ".xml":
@@ -842,7 +979,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		case ".dat":
 			fileKey = "dat:CU"
 		default:
-			return
+			return nil
 		}
 
 		status, completed, err := store.RecordCapture(state.CaptureObservation{
@@ -854,8 +991,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 			RequireDAT:       true,
 		})
 		if err != nil {
-			log.Error().Err(err).Str("capture", info.CaptureNumber).Msg("Failed to persist capture state")
-			return
+			return err
 		}
 
 		atomic.StoreInt32(&s.completedCaptures, int32(status.CompletedCaptures))
@@ -890,7 +1026,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 			}
 		}
 
-		return
+		return nil
 	}
 
 	s.mu.Lock()
@@ -909,7 +1045,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 	if fileExt == ".raw" {
 		sensorCode := strings.TrimSpace(info.SensorCode)
 		if _, ok := s.requiredSensors[sensorCode]; !ok {
-			return
+			return nil
 		}
 		fileKey = fmt.Sprintf("raw:%s", sensorCode)
 	} else if fileExt == ".xml" {
@@ -918,12 +1054,12 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		// RawQv quality data file - optional supplemental file per capture
 		fileKey = "dat:CU"
 	} else {
-		return // Unknown file type
+		return nil // Unknown file type
 	}
 
 	// Skip if already tracked
 	if fileMap[fileKey] {
-		return
+		return nil
 	}
 
 	fileMap[fileKey] = true
@@ -957,8 +1093,11 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 		Bool("require_rawqv", true).
 		Msgf("Capture progress: %s", formatCaptureSummary(rawCount, hasXML, hasDAT))
 
+	requireXML := !info.IsTest
+	requireDAT := !info.IsTest
+
 	// Check if capture is complete
-	isComplete := rawCount == requiredRAWFiles && hasXML && hasDAT
+	isComplete := rawCount == requiredRAWFiles && (!requireXML || hasXML) && (!requireDAT || hasDAT)
 
 	if isComplete {
 		summary := formatCaptureSummary(rawCount, hasXML, hasDAT)
@@ -991,10 +1130,43 @@ func (s *Service) trackCaptureCompletion(filename, node string) {
 
 		delete(s.captureTracker, info.CaptureNumber)
 	}
+
+	return nil
 }
 
 func (s *Service) checkDiskSpace(path string) bool {
-	// TODO: Implement disk space check
+	s.mu.RLock()
+	diskUsage := s.diskUsage
+	minFreeDiskSpace := s.minFreeDiskSpace
+	safetyMargin := s.diskSpaceSafetyMargin
+	s.mu.RUnlock()
+
+	if diskUsage == nil {
+		diskUsage = disk.Usage
+	}
+
+	usage, err := diskUsage(path)
+	if err != nil {
+		log.Error().Err(err).Str("path", path).Msg("Failed to check free disk space")
+		return false
+	}
+
+	requiredFree := minFreeDiskSpace + safetyMargin
+	if requiredFree <= 0 {
+		return true
+	}
+
+	if int64(usage.Free) < requiredFree {
+		log.Warn().
+			Str("path", path).
+			Uint64("free_bytes", usage.Free).
+			Int64("required_free_bytes", requiredFree).
+			Int64("min_free_disk_space", minFreeDiskSpace).
+			Int64("disk_space_safety_margin", safetyMargin).
+			Msg("Insufficient free disk space, skipping sync iteration")
+		return false
+	}
+
 	return true
 }
 
