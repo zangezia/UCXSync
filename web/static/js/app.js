@@ -354,11 +354,14 @@ class UCXSyncApp {
                     : 'Инстанс готов к запуску.';
             const shareList = Array.isArray(instance.unavailable_shares) && instance.unavailable_shares.length > 0
                 ? `
-                    <div class="preflight-share-list">
-                        ${instance.unavailable_shares.map(share => `
-                            <div class="preflight-share-item">${this.escapeHtml(`${share.node}/${share.share} — ${share.path}`)}</div>
-                        `).join('')}
-                    </div>
+                    <details class="preflight-share-details">
+                        <summary>Показать подробности (${instance.unavailable_shares.length})</summary>
+                        <div class="preflight-share-list">
+                            ${instance.unavailable_shares.map(share => `
+                                <div class="preflight-share-item">${this.escapeHtml(`${share.node}/${share.share} — ${share.path}`)}</div>
+                            `).join('')}
+                        </div>
+                    </details>
                 `
                 : '';
 
@@ -905,11 +908,14 @@ class UCXSyncApp {
             let extra = '';
             if (check.key === 'shares' && Array.isArray(preflight.unavailable_shares) && preflight.unavailable_shares.length > 0) {
                 extra = `
-                    <div class="preflight-share-list">
-                        ${preflight.unavailable_shares.map(share => `
-                            <div class="preflight-share-item">${this.escapeHtml(`${share.node}/${share.share} — ${share.path}`)}</div>
-                        `).join('')}
-                    </div>
+                    <details class="preflight-share-details">
+                        <summary>Показать подробности (${preflight.unavailable_shares.length})</summary>
+                        <div class="preflight-share-list">
+                            ${preflight.unavailable_shares.map(share => `
+                                <div class="preflight-share-item">${this.escapeHtml(`${share.node}/${share.share} — ${share.path}`)}</div>
+                            `).join('')}
+                        </div>
+                    </details>
                 `;
             }
 

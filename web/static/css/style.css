@@ -283,10 +283,38 @@ h2 {
     font-size: 0.92rem;
 }
 
+.preflight-share-details {
+    margin-top: 10px;
+}
+
+.preflight-share-details summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    color: var(--secondary-color);
+    font-weight: 600;
+    list-style: none;
+}
+
+.preflight-share-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.preflight-share-details[open] summary {
+    color: var(--primary-color);
+}
+
 .preflight-share-list {
     display: grid;
     gap: 6px;
-    margin-top: 4px;
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    max-height: 220px;
+    overflow: auto;
 }
 
 .preflight-share-item {
