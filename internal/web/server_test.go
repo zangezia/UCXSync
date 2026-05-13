@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -241,6 +242,49 @@ func TestAutoRemountSharesRetriesWhenSharesUnavailable(t *testing.T) {
 	}
 }
 
+func TestAutoRemountSharesAttemptsImmediatelyWhenSharesUnavailable(t *testing.T) {
+	t.Parallel()
+
+	remountStarted := make(chan struct{}, 1)
+	server := &Server{
+		cfg:                      &config.Config{Sync: config.Sync{ServiceLoopInterval: time.Hour}},
+		checkNetworkRequirements: func() error { return nil },
+		checkSharesAvailability: func() []syncService.UnavailableShare {
+			return []syncService.UnavailableShare{{Node: "WU01", Share: "E$", Path: "/ucmount/WU01/E"}}
+		},
+		mountSharesFunc: func() error {
+			select {
+			case remountStarted <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		server.autoRemountShares(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-remountStarted:
+	case <-time.After(100 * time.Millisecond):
+		cancel()
+		t.Fatal("expected immediate remount attempt before first ticker interval")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("autoRemountShares did not stop after context cancellation")
+	}
+}
+
 func TestBuildPreflightStatusReady(t *testing.T) {
 	t.Parallel()
 
@@ -252,8 +296,8 @@ func TestBuildPreflightStatusReady(t *testing.T) {
 		t.Fatalf("preflight.Ready = false, want true")
 	}
 
-	if len(preflight.Checks) != 6 {
-		t.Fatalf("len(preflight.Checks) = %d, want 6", len(preflight.Checks))
+	if len(preflight.Checks) != 5 {
+		t.Fatalf("len(preflight.Checks) = %d, want 5", len(preflight.Checks))
 	}
 
 	for _, check := range preflight.Checks {
@@ -389,6 +433,124 @@ func TestHandleGetPreflightReturnsJSON(t *testing.T) {
 	}
 }
 
+func TestBuildDashboardPreflightStatusAggregatesBlockedInstance(t *testing.T) {
+	t.Parallel()
+
+	instanceA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(models.PreflightStatus{
+			Ready: true,
+			Checks: []models.PreflightCheck{
+				{Key: "sync", Label: "Состояние службы", Status: "ready", Message: "ready"},
+				{Key: "project", Label: "Проект", Status: "ready", Message: "ready"},
+				{Key: "destination", Label: "Диск назначения", Status: "ready", Message: "ready"},
+				{Key: "shares", Label: "Сетевые шары", Status: "ready", Message: "ready"},
+				{Key: "disk", Label: "Свободное место", Status: "ready", Message: "ready"},
+			},
+		})
+	}))
+	defer instanceA.Close()
+
+	instanceB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(models.PreflightStatus{
+			Ready:             false,
+			UnavailableShares: []models.PreflightUnavailableShare{{Node: "WU08", Share: "E$", Path: "/ucmount-b/WU08/E"}},
+			Checks: []models.PreflightCheck{
+				{Key: "sync", Label: "Состояние службы", Status: "ready", Message: "ready"},
+				{Key: "project", Label: "Проект", Status: "ready", Message: "ready"},
+				{Key: "destination", Label: "Диск назначения", Status: "ready", Message: "ready"},
+				{Key: "shares", Label: "Сетевые шары", Status: "blocked", Message: "Недоступно сетевых шар: 1"},
+				{Key: "disk", Label: "Свободное место", Status: "ready", Message: "ready"},
+			},
+		})
+	}))
+	defer instanceB.Close()
+
+	server := &Server{
+		cfg: &config.Config{Web: config.Web{Dashboard: config.WebDashboard{Instances: []config.DashboardInstance{
+			{ID: "a", Name: "Instance A", URL: instanceA.URL},
+			{ID: "b", Name: "Instance B", URL: instanceB.URL},
+		}}}},
+		httpClient: &http.Client{Timeout: 2 * time.Second},
+	}
+
+	preflight := server.buildDashboardPreflightStatus(context.Background(), "ProjA", "/ucdata")
+
+	if preflight.Ready {
+		t.Fatalf("preflight.Ready = true, want false")
+	}
+	if len(preflight.Instances) != 2 {
+		t.Fatalf("len(preflight.Instances) = %d, want 2", len(preflight.Instances))
+	}
+
+	sharesCheck := findPreflightCheck(t, models.PreflightStatus{Checks: preflight.Checks}, "shares")
+	if sharesCheck.Status != "blocked" {
+		t.Fatalf("shares check status = %q, want blocked", sharesCheck.Status)
+	}
+	if !strings.Contains(sharesCheck.Message, "Instance B") {
+		t.Fatalf("shares check message = %q, want mention Instance B", sharesCheck.Message)
+	}
+
+	if preflight.Instances[1].Ready {
+		t.Fatalf("preflight.Instances[1].Ready = true, want false")
+	}
+	if len(preflight.Instances[1].UnavailableShares) != 1 {
+		t.Fatalf("len(preflight.Instances[1].UnavailableShares) = %d, want 1", len(preflight.Instances[1].UnavailableShares))
+	}
+}
+
+func TestHandleDashboardPreflightReturnsJSON(t *testing.T) {
+	t.Parallel()
+
+	instance := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/preflight" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(models.PreflightStatus{
+			Ready: true,
+			Checks: []models.PreflightCheck{
+				{Key: "sync", Label: "Состояние службы", Status: "ready", Message: "ready"},
+				{Key: "project", Label: "Проект", Status: "ready", Message: "ready"},
+				{Key: "destination", Label: "Диск назначения", Status: "ready", Message: "ready"},
+				{Key: "shares", Label: "Сетевые шары", Status: "ready", Message: "ready"},
+				{Key: "disk", Label: "Свободное место", Status: "ready", Message: "ready"},
+			},
+		})
+	}))
+	defer instance.Close()
+
+	server := &Server{
+		cfg: &config.Config{Web: config.Web{Dashboard: config.WebDashboard{Instances: []config.DashboardInstance{{
+			ID: "a", Name: "Instance A", URL: instance.URL,
+		}}}}},
+		httpClient: &http.Client{Timeout: 2 * time.Second},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/preflight?project=ProjA&destination=%2Fucdata", nil)
+	resp := httptest.NewRecorder()
+
+	server.handleDashboardPreflight(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.Code)
+	}
+
+	var payload models.DashboardPreflightStatus
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if !payload.Ready {
+		t.Fatalf("payload.Ready = false, want true")
+	}
+	if payload.SelectedProject != "ProjA" {
+		t.Fatalf("SelectedProject = %q, want ProjA", payload.SelectedProject)
+	}
+	if len(payload.Instances) != 1 {
+		t.Fatalf("len(payload.Instances) = %d, want 1", len(payload.Instances))
+	}
+}
+
 func newPreflightTestServer(status models.SyncStatus, mutate func(*Server)) *Server {
 	server := &Server{
 		cfg: &config.Config{},
@@ -402,7 +564,6 @@ func newPreflightTestServer(status models.SyncStatus, mutate func(*Server)) *Ser
 			return []models.DestinationInfo{{Path: "/ucdata", Label: "USB-SSD Storage (default)", Type: "usb", FreeSpaceGB: 8, TotalGB: 16, IsDefault: true}}
 		},
 		checkSharesAvailability: func() []syncService.UnavailableShare { return nil },
-		ensureDestinationFunc:   func(string) error { return nil },
 		checkDiskSpaceFunc: func(string) (syncService.DiskSpaceCheckResult, error) {
 			return syncService.DiskSpaceCheckResult{
 				OK:                true,

@@ -126,6 +126,32 @@ type PreflightStatus struct {
 	Checks                []PreflightCheck            `json:"checks"`
 }
 
+// DashboardPreflightInstanceStatus contains readiness details for one dashboard instance.
+type DashboardPreflightInstanceStatus struct {
+	ID                    string                      `json:"id"`
+	Name                  string                      `json:"name"`
+	URL                   string                      `json:"url"`
+	Available             bool                        `json:"available"`
+	Error                 string                      `json:"error,omitempty"`
+	Ready                 bool                        `json:"ready"`
+	IsRunning             bool                        `json:"is_running"`
+	AvailableProjects     int                         `json:"available_projects"`
+	AvailableDestinations int                         `json:"available_destinations"`
+	FreeSpaceGB           float64                     `json:"free_space_gb,omitempty"`
+	RequiredFreeSpaceGB   float64                     `json:"required_free_space_gb,omitempty"`
+	UnavailableShares     []PreflightUnavailableShare `json:"unavailable_shares,omitempty"`
+	Checks                []PreflightCheck            `json:"checks,omitempty"`
+}
+
+// DashboardPreflightStatus contains the aggregate readiness state across dashboard instances.
+type DashboardPreflightStatus struct {
+	Ready               bool                               `json:"ready"`
+	SelectedProject     string                             `json:"selected_project"`
+	SelectedDestination string                             `json:"selected_destination"`
+	Checks              []PreflightCheck                   `json:"checks"`
+	Instances           []DashboardPreflightInstanceStatus `json:"instances"`
+}
+
 // BlockDeviceInfo holds information about a block device
 type BlockDeviceInfo struct {
 	DevicePath  string `json:"device_path"`  // e.g., /dev/sdb1

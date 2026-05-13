@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -155,20 +156,9 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 // Start starts the web server
 func (s *Server) Start(ctx context.Context) error {
-	// Check network requirements
-	if err := s.requireNetworkRequirements(); err != nil {
-		log.Warn().Err(err).Msg("Network requirements check failed")
-	}
-
-	// Mount network shares
-	if err := s.mountAllShares(); err != nil {
-		log.Error().Err(err).Msg("Failed to mount network shares")
-	}
-
 	// Start performance monitoring
 	metricsChan := s.monService.Start(ctx)
 	go s.broadcastMetrics(ctx, metricsChan)
-	go s.autoRemountShares(ctx)
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -197,6 +187,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/dashboard/project-stats", s.handleDashboardProjectStats)
 	mux.HandleFunc("/api/dashboard/config", s.handleDashboardConfig)
 	mux.HandleFunc("/api/dashboard/overview", s.handleDashboardOverview)
+	mux.HandleFunc("/api/dashboard/preflight", s.handleDashboardPreflight)
 	mux.HandleFunc("/api/dashboard/projects", s.handleDashboardProjects)
 	mux.HandleFunc("/api/dashboard/destinations", s.handleDashboardDestinations)
 	mux.HandleFunc("/api/dashboard/sync/start", s.handleDashboardStartSync)
@@ -218,6 +209,8 @@ func (s *Server) Start(ctx context.Context) error {
 			log.Error().Err(err).Msg("Web server error")
 		}
 	}()
+
+	go s.autoRemountShares(ctx)
 
 	// Wait for context cancellation
 	<-ctx.Done()
@@ -301,15 +294,29 @@ func (s *Server) handleGetPreflight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.dashboardEnabled() {
-		http.Error(w, "Preflight is not available in dashboard mode", http.StatusNotFound)
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	destination := strings.TrimSpace(r.URL.Query().Get("destination"))
+
+	preflight := s.buildPreflightStatus(r.Context(), project, destination)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(preflight)
+}
+
+func (s *Server) handleDashboardPreflight(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.dashboardEnabled() {
+		http.Error(w, "Dashboard mode is not configured", http.StatusNotFound)
 		return
 	}
 
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	destination := strings.TrimSpace(r.URL.Query().Get("destination"))
-
-	preflight := s.buildPreflightStatus(r.Context(), project, destination)
+	preflight := s.buildDashboardPreflightStatus(r.Context(), project, destination)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(preflight)
@@ -1007,11 +1014,29 @@ func (s *Server) checkDestinationDiskSpace(destination string) (syncService.Disk
 	return s.syncService.CheckDiskSpace(destination)
 }
 
+func (s *Server) attemptShareRemount() {
+	unavailable := s.getUnavailableShares()
+	if len(unavailable) == 0 {
+		return
+	}
+
+	if err := s.requireNetworkRequirements(); err != nil {
+		log.Warn().Err(err).Msg("Skipping share remount: requirements not met")
+		return
+	}
+
+	if err := s.mountAllShares(); err != nil {
+		log.Warn().Err(err).Msg("Share remount attempt failed")
+	}
+}
+
 func (s *Server) autoRemountShares(ctx context.Context) {
 	interval := 10 * time.Second
 	if s.cfg != nil && s.cfg.Sync.ServiceLoopInterval > 0 {
 		interval = s.cfg.Sync.ServiceLoopInterval
 	}
+
+	s.attemptShareRemount()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -1021,20 +1046,7 @@ func (s *Server) autoRemountShares(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			unavailable := s.getUnavailableShares()
-			if len(unavailable) == 0 {
-				continue
-			}
-
-			if err := s.requireNetworkRequirements(); err != nil {
-				log.Warn().Err(err).Msg("Skipping automatic share remount: requirements not met")
-				continue
-			}
-
-			if err := s.mountAllShares(); err != nil {
-				log.Warn().Err(err).Msg("Automatic share remount attempt failed")
-				continue
-			}
+			s.attemptShareRemount()
 		}
 	}
 }
@@ -1138,15 +1150,8 @@ func (s *Server) buildPreflightStatus(ctx context.Context, project, destination 
 	}
 
 	if destination == "" || !destinationFound {
-		appendCheck("mount", "Готовность пути", "blocked", "Путь назначения ещё не выбран")
 		appendCheck("disk", "Свободное место", "blocked", "Невозможно проверить место без выбранного накопителя")
 		return preflight
-	}
-
-	if err := s.ensureDestinationReady(destination); err != nil {
-		appendCheck("mount", "Готовность пути", "blocked", err.Error())
-	} else {
-		appendCheck("mount", "Готовность пути", "ready", "Путь назначения готов к записи")
 	}
 
 	diskCheck, err := s.checkDestinationDiskSpace(destination)
@@ -1175,6 +1180,178 @@ func (s *Server) buildPreflightStatus(ctx context.Context, project, destination 
 	}
 
 	return preflight
+}
+
+func (s *Server) buildDashboardPreflightStatus(ctx context.Context, project, destination string) models.DashboardPreflightStatus {
+	preflight := models.DashboardPreflightStatus{
+		Ready:               true,
+		SelectedProject:     project,
+		SelectedDestination: destination,
+		Checks:              make([]models.PreflightCheck, 0, 7),
+		Instances:           make([]models.DashboardPreflightInstanceStatus, len(s.cfg.Web.Dashboard.Instances)),
+	}
+
+	if !s.dashboardEnabled() {
+		preflight.Ready = false
+		preflight.Checks = append(preflight.Checks, models.PreflightCheck{
+			Key:     "instances",
+			Label:   "Инстансы",
+			Status:  "blocked",
+			Message: "Shared dashboard не настроен",
+		})
+		return preflight
+	}
+
+	query := url.Values{}
+	if project != "" {
+		query.Set("project", project)
+	}
+	if destination != "" {
+		query.Set("destination", destination)
+	}
+	apiPath := "/api/preflight"
+	if encoded := query.Encode(); encoded != "" {
+		apiPath += "?" + encoded
+	}
+
+	var wg sync.WaitGroup
+	for i, instance := range s.cfg.Web.Dashboard.Instances {
+		wg.Add(1)
+		go func(index int, inst config.DashboardInstance) {
+			defer wg.Done()
+
+			instanceStatus := models.DashboardPreflightInstanceStatus{
+				ID:   inst.ID,
+				Name: inst.Name,
+				URL:  inst.URL,
+			}
+
+			var payload models.PreflightStatus
+			if _, err := s.proxyJSON(ctx, http.MethodGet, inst.URL, apiPath, nil, &payload); err != nil {
+				instanceStatus.Available = false
+				instanceStatus.Error = err.Error()
+				instanceStatus.Ready = false
+			} else {
+				instanceStatus.Available = true
+				instanceStatus.Ready = payload.Ready
+				instanceStatus.IsRunning = payload.IsRunning
+				instanceStatus.AvailableProjects = payload.AvailableProjects
+				instanceStatus.AvailableDestinations = payload.AvailableDestinations
+				instanceStatus.FreeSpaceGB = payload.FreeSpaceGB
+				instanceStatus.RequiredFreeSpaceGB = payload.RequiredFreeSpaceGB
+				instanceStatus.UnavailableShares = payload.UnavailableShares
+				instanceStatus.Checks = payload.Checks
+			}
+
+			preflight.Instances[index] = instanceStatus
+		}(i, instance)
+	}
+
+	wg.Wait()
+	preflight.Checks = aggregateDashboardPreflightChecks(preflight.Instances)
+	for _, check := range preflight.Checks {
+		if check.Status != "ready" {
+			preflight.Ready = false
+			break
+		}
+	}
+
+	return preflight
+}
+
+func aggregateDashboardPreflightChecks(instances []models.DashboardPreflightInstanceStatus) []models.PreflightCheck {
+	checks := make([]models.PreflightCheck, 0, 7)
+	appendCheck := func(key, label, status, message string) {
+		checks = append(checks, models.PreflightCheck{
+			Key:     key,
+			Label:   label,
+			Status:  status,
+			Message: message,
+		})
+	}
+
+	if len(instances) == 0 {
+		appendCheck("instances", "Инстансы", "blocked", "Нет настроенных инстансов для общего дашборда")
+		return checks
+	}
+
+	unavailableMessages := make([]string, 0)
+	availableCount := 0
+	for _, instance := range instances {
+		if instance.Available {
+			availableCount++
+			continue
+		}
+		message := instance.Error
+		if strings.TrimSpace(message) == "" {
+			message = "инстанс недоступен"
+		}
+		unavailableMessages = append(unavailableMessages, fmt.Sprintf("%s: %s", instance.Name, message))
+	}
+
+	if len(unavailableMessages) == 0 {
+		appendCheck("instances", "Инстансы", "ready", fmt.Sprintf("Все инстансы на связи (%d/%d)", availableCount, len(instances)))
+	} else {
+		appendCheck("instances", "Инстансы", "blocked", strings.Join(unavailableMessages, "; "))
+	}
+
+	definitions := []struct {
+		key          string
+		label        string
+		readyMessage string
+	}{
+		{key: "sync", label: "Состояние служб", readyMessage: "Все инстансы готовы к новому запуску"},
+		{key: "project", label: "Проект", readyMessage: "Проект выбран и найден на всех инстансах"},
+		{key: "destination", label: "Диск назначения", readyMessage: "Накопитель назначения доступен на всех инстансах"},
+		{key: "shares", label: "Сетевые шары", readyMessage: "Все сетевые шары доступны на всех инстансах"},
+		{key: "disk", label: "Свободное место", readyMessage: "Свободного места достаточно на всех инстансах"},
+	}
+
+	for _, definition := range definitions {
+		blockers := make([]string, 0)
+		readyCount := 0
+		for _, instance := range instances {
+			if !instance.Available {
+				blockers = append(blockers, fmt.Sprintf("%s: инстанс недоступен", instance.Name))
+				continue
+			}
+
+			check, ok := findPreflightCheckByKey(instance.Checks, definition.key)
+			if !ok {
+				blockers = append(blockers, fmt.Sprintf("%s: нет данных проверки", instance.Name))
+				continue
+			}
+
+			if check.Status == "ready" {
+				readyCount++
+				continue
+			}
+
+			message := strings.TrimSpace(check.Message)
+			if message == "" {
+				message = "есть блокер"
+			}
+			blockers = append(blockers, fmt.Sprintf("%s: %s", instance.Name, message))
+		}
+
+		if len(blockers) == 0 && readyCount == len(instances) {
+			appendCheck(definition.key, definition.label, "ready", definition.readyMessage)
+		} else {
+			appendCheck(definition.key, definition.label, "blocked", strings.Join(blockers, "; "))
+		}
+	}
+
+	return checks
+}
+
+func findPreflightCheckByKey(checks []models.PreflightCheck, key string) (models.PreflightCheck, bool) {
+	for _, check := range checks {
+		if check.Key == key {
+			return check, true
+		}
+	}
+
+	return models.PreflightCheck{}, false
 }
 
 func (s *Server) handleDashboardOverview(w http.ResponseWriter, r *http.Request) {
