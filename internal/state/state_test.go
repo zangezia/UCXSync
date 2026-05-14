@@ -56,6 +56,68 @@ func TestStorePersistsProjects(t *testing.T) {
 	}
 }
 
+func TestStoreListsAndDeletesProjectDatabaseSummaries(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	if err := store.SaveProjects([]models.ProjectInfo{{Name: "ProjA", Source: "WU01/E$"}}); err != nil {
+		t.Fatalf("SaveProjects returned error: %v", err)
+	}
+	if _, err := store.StartRun("ProjA", "/ucdata", 4); err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if err := store.StopRun(StatusSnapshot{Project: "ProjA", Destination: "/ucdata", MaxParallelism: 4}); err != nil {
+		t.Fatalf("StopRun returned error: %v", err)
+	}
+	if err := store.MarkFileCopied("ProjA", "raw/file.raw", 100, time.Unix(1710000000, 0).UTC()); err != nil {
+		t.Fatalf("MarkFileCopied returned error: %v", err)
+	}
+
+	for _, obs := range []CaptureObservation{
+		{Project: "ProjA", Info: models.CaptureInfo{DataType: "Lvl00", CaptureNumber: "00001", ProjectName: "ProjA", SensorCode: "00-00", SessionID: "ABC", IsVerified: true}, FileKey: "raw:00-00", RequiredRawFiles: 1, RequireXML: false, RequireDAT: false},
+	} {
+		if _, _, err := store.RecordCapture(obs); err != nil {
+			t.Fatalf("RecordCapture returned error: %v", err)
+		}
+	}
+
+	summaries, err := store.ListProjectDatabaseSummaries()
+	if err != nil {
+		t.Fatalf("ListProjectDatabaseSummaries returned error: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+	if summaries[0].Name != "ProjA" || summaries[0].CopiedFiles != 1 || summaries[0].CompletedCaptures != 1 {
+		t.Fatalf("unexpected summary: %#v", summaries[0])
+	}
+
+	if err := store.DeleteProject("ProjA"); err != nil {
+		t.Fatalf("DeleteProject returned error: %v", err)
+	}
+
+	summaries, err = store.ListProjectDatabaseSummaries()
+	if err != nil {
+		t.Fatalf("ListProjectDatabaseSummaries after delete returned error: %v", err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("expected empty summaries after delete, got %#v", summaries)
+	}
+}
+
+func TestStoreClearDatabaseRejectsRunningSync(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	if _, err := store.StartRun("ProjA", "/ucdata", 4); err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	if err := store.ClearDatabase(); err == nil {
+		t.Fatal("expected ClearDatabase to reject active sync")
+	}
+}
+
 func TestStorePersistsCaptureProgressAndStatus(t *testing.T) {
 	t.Parallel()
 

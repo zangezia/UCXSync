@@ -184,6 +184,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/project-stats", s.handleGetProjectStats)
 	mux.HandleFunc("/api/project/report", s.handleDownloadProjectReport)
 	mux.HandleFunc("/api/project/clear-history", s.handleClearProjectHistory)
+	mux.HandleFunc("/api/database/projects", s.handleDatabaseProjects)
+	mux.HandleFunc("/api/database/project", s.handleDatabaseProject)
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("/api/preflight", s.handleGetPreflight)
 	mux.HandleFunc("/api/sync/start", s.handleStartSync)
@@ -933,6 +935,104 @@ func (s *Server) handleClearProjectHistory(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "cleared", "project": body.Project})
+}
+
+func (s *Server) handleDatabaseProjects(w http.ResponseWriter, r *http.Request) {
+	if s.stateStore == nil {
+		http.Error(w, "state store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		projects, err := s.stateStore.ListProjectDatabaseSummaries()
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to list database projects")
+			http.Error(w, fmt.Sprintf("failed to list database projects: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(projects)
+	case http.MethodDelete:
+		if status := s.currentSyncStatus(); status.IsRunning {
+			http.Error(w, "cannot clear database while sync is running", http.StatusConflict)
+			return
+		}
+
+		if err := s.stateStore.ClearDatabase(); err != nil {
+			statusCode := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "sync is running") {
+				statusCode = http.StatusConflict
+			}
+			log.Error().Err(err).Msg("Failed to clear project database")
+			http.Error(w, fmt.Sprintf("failed to clear database: %v", err), statusCode)
+			return
+		}
+
+		log.Warn().Msg("Project database cleared")
+		s.broadcast(models.WSMessage{
+			Type: "log",
+			Payload: models.LogMessage{
+				Timestamp: time.Now(),
+				Level:     "warn",
+				Message:   "Project database cleared",
+			},
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleDatabaseProject(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.stateStore == nil {
+		http.Error(w, "state store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var body struct {
+		Project string `json:"project"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Project) == "" {
+		http.Error(w, "project field required", http.StatusBadRequest)
+		return
+	}
+	body.Project = strings.TrimSpace(body.Project)
+
+	if s.syncService != nil && s.syncService.IsProjectRunning(body.Project) {
+		http.Error(w, "cannot delete project while sync is running", http.StatusConflict)
+		return
+	}
+
+	if err := s.stateStore.DeleteProject(body.Project); err != nil {
+		statusCode := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "sync is running") {
+			statusCode = http.StatusConflict
+		}
+		log.Error().Err(err).Str("project", body.Project).Msg("Failed to delete project from database")
+		http.Error(w, fmt.Sprintf("failed to delete project: %v", err), statusCode)
+		return
+	}
+
+	log.Warn().Str("project", body.Project).Msg("Project deleted from database")
+	s.broadcast(models.WSMessage{
+		Type: "log",
+		Payload: models.LogMessage{
+			Timestamp: time.Now(),
+			Level:     "warn",
+			Message:   fmt.Sprintf("Project '%s' deleted from database", body.Project),
+		},
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "project": body.Project})
 }
 
 func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {

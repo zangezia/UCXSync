@@ -63,6 +63,7 @@ class UCXSyncApp {
         this.stopBtn = document.getElementById('stop-btn');
         this.refreshBtn = document.getElementById('refresh-projects');
         this.manageDevicesBtn = document.getElementById('manage-devices-btn');
+        this.manageDbBtn = document.getElementById('manage-db-btn');
         this.mountSharesBtn = document.getElementById('mount-shares-btn');
         this.downloadReportBtn = document.getElementById('download-report-btn');
         this.restartServiceBtn = document.getElementById('restart-service-btn');
@@ -109,6 +110,10 @@ class UCXSyncApp {
         // Device modal
         this.deviceModal = document.getElementById('device-modal');
         this.devicesBody = document.getElementById('devices-body');
+        this.databaseModal = document.getElementById('database-modal');
+        this.databaseProjectsBody = document.getElementById('database-projects-body');
+        this.databaseSummary = document.getElementById('database-summary');
+        this.clearDatabaseBtn = document.getElementById('clear-database-btn');
 
         // Service indicators
         this.serviceIndicators = document.getElementById('service-indicators');
@@ -149,6 +154,8 @@ class UCXSyncApp {
         });
 
         this.manageDevicesBtn.addEventListener('click', () => this.openDeviceModal());
+        this.manageDbBtn?.addEventListener('click', () => this.openDatabaseModal());
+        this.clearDatabaseBtn?.addEventListener('click', () => this.clearDatabase());
         this.downloadReportBtn?.addEventListener('click', () => this.downloadProjectReport());
         this.mountSharesBtn.addEventListener('click', () => {
             if (this.mode === 'dashboard') {
@@ -1353,6 +1360,131 @@ class UCXSyncApp {
         await this.loadDevices();
     }
 
+    async openDatabaseModal() {
+        this.databaseModal.classList.add('active');
+        await this.loadDatabaseProjects();
+    }
+
+    async loadDatabaseProjects() {
+        if (!this.databaseProjectsBody || !this.databaseSummary) {
+            return;
+        }
+
+        this.databaseSummary.textContent = 'Загрузка...';
+        this.databaseProjectsBody.innerHTML = '<tr><td colspan="5" class="no-data">Загрузка...</td></tr>';
+
+        try {
+            const projects = await this.fetchJSON('/api/database/projects');
+            const list = Array.isArray(projects) ? projects : [];
+            this.renderDatabaseProjects(list);
+        } catch (error) {
+            this.log(`Ошибка загрузки базы проектов: ${error.message}`, 'error');
+            this.databaseSummary.textContent = 'Не удалось загрузить список проектов.';
+            this.databaseProjectsBody.innerHTML = '<tr><td colspan="5" class="no-data">Ошибка загрузки</td></tr>';
+        }
+    }
+
+    renderDatabaseProjects(projects) {
+        const totalCopied = projects.reduce((sum, project) => sum + (project.copied_files || 0), 0);
+        const totalCaptures = projects.reduce((sum, project) => sum + (project.captures || 0), 0);
+        this.databaseSummary.textContent = `Проектов: ${projects.length}; снимков в истории: ${totalCaptures}; файлов в истории копирования: ${totalCopied}`;
+
+        if (projects.length === 0) {
+            this.databaseProjectsBody.innerHTML = '<tr><td colspan="5" class="no-data">В базе пока нет проектов</td></tr>';
+            return;
+        }
+
+        this.databaseProjectsBody.innerHTML = projects.map(project => {
+            const completed = project.completed_captures || 0;
+            const test = project.completed_test_captures || 0;
+            const captures = project.captures || 0;
+            const copied = project.copied_files || 0;
+            const ead = project.ead_records || 0;
+            const lastSeen = project.last_seen_at ? new Date(project.last_seen_at).toLocaleString() : '';
+            const summaryParts = [
+                `захватов: ${captures}`,
+                `готово: ${completed}`,
+                `тест: ${test}`,
+                `файлов: ${copied}`,
+                `EAD: ${ead}`
+            ];
+            const lastCapture = project.last_capture_number || project.last_test_capture_number || '-';
+            const source = project.source || '-';
+            const lastSeenMarkup = lastSeen ? `<div class="database-last-seen">${this.escapeHtml(lastSeen)}</div>` : '';
+
+            return `
+                <tr>
+                    <td><strong>${this.escapeHtml(project.name)}</strong>${lastSeenMarkup}</td>
+                    <td>${this.escapeHtml(source)}</td>
+                    <td>${summaryParts.map(part => `<span class="database-chip">${this.escapeHtml(part)}</span>`).join('')}</td>
+                    <td>${this.escapeHtml(lastCapture)}</td>
+                    <td>
+                        <button class="btn btn-danger btn-small" data-action="delete-db-project" data-project="${this.escapeHtml(project.name)}">Удалить</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        this.databaseProjectsBody.querySelectorAll('[data-action="delete-db-project"]').forEach(button => {
+            button.addEventListener('click', () => this.deleteDatabaseProject(button.dataset.project));
+        });
+    }
+
+    async deleteDatabaseProject(project) {
+        if (!project) {
+            return;
+        }
+        if (!window.confirm(`Удалить проект "${project}" из базы данных?`)) {
+            return;
+        }
+
+        try {
+            await this.fetchJSON('/api/database/project', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project })
+            });
+            this.log(`Проект "${project}" удален из базы`, 'warn');
+            if (this.projectSelect.value === project) {
+                this.projectSelect.value = '';
+                this.saveSettings();
+                this.loadProjectStats();
+            }
+            await this.refreshProjectSelectors();
+            await this.loadDatabaseProjects();
+        } catch (error) {
+            this.log(`Ошибка удаления проекта "${project}": ${error.message}`, 'error');
+        }
+    }
+
+    async clearDatabase() {
+        if (!window.confirm('Очистить всю базу проектов? Это удалит историю проектов, копирования, захватов и EAD.')) {
+            return;
+        }
+
+        try {
+            await this.fetchJSON('/api/database/projects', { method: 'DELETE' });
+            this.log('База проектов очищена', 'warn');
+            this.projectSelect.value = '';
+            this.saveSettings();
+            this.loadProjectStats();
+            await this.refreshProjectSelectors();
+            await this.loadDatabaseProjects();
+        } catch (error) {
+            this.log(`Ошибка очистки базы проектов: ${error.message}`, 'error');
+        }
+    }
+
+    async refreshProjectSelectors() {
+        if (this.mode === 'dashboard') {
+            await this.loadDashboardProjects();
+            await this.refreshDashboardPreflight({ silent: true }).catch(() => {});
+        } else {
+            await this.loadProjects();
+            await this.refreshPreflight({ silent: true }).catch(() => {});
+        }
+    }
+
     async loadDevices() {
         this.devicesBody.innerHTML = '<tr><td colspan="6" class="no-data">Загрузка...</td></tr>';
 
@@ -1454,6 +1586,14 @@ function closeDeviceModal() {
 
 function refreshDevices() {
     window.app.loadDevices();
+}
+
+function closeDatabaseModal() {
+    document.getElementById('database-modal').classList.remove('active');
+}
+
+function refreshDatabaseProjects() {
+    window.app.loadDatabaseProjects();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

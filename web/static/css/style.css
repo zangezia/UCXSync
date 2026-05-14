@@ -397,6 +397,11 @@ h2 {
     background: #da190b;
 }
 
+.btn-small {
+    padding: 7px 12px;
+    font-size: 0.85rem;
+}
+
 /* Status Panel */
 .status-grid {
     display: grid;
@@ -998,4 +1003,37 @@ footer {
 .btn-unmount:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* Project database modal */
+.database-modal-content {
+    max-width: 1100px;
+}
+
+.database-summary {
+    margin-bottom: 14px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.database-projects-table td {
+    vertical-align: top;
+}
+
+.database-chip {
+    display: inline-flex;
+    margin: 0 6px 6px 0;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+.database-last-seen {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
 }

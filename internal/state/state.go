@@ -422,6 +422,62 @@ func (s *Store) LoadProjects() ([]models.ProjectInfo, error) {
 	return projects, rows.Err()
 }
 
+func (s *Store) ListProjectDatabaseSummaries() ([]models.ProjectDatabaseSummary, error) {
+	rows, err := s.db.Query(`
+		WITH project_names AS (
+			SELECT DISTINCT project_name FROM projects
+			UNION SELECT DISTINCT project_name FROM captures
+			UNION SELECT DISTINCT project_name FROM copied_files
+			UNION SELECT DISTINCT project_name FROM ead_records
+			UNION SELECT DISTINCT project_name FROM ead_processing_status
+		)
+		SELECT
+			p.project_name,
+			COALESCE((SELECT GROUP_CONCAT(source, ', ') FROM (
+				SELECT DISTINCT source FROM projects WHERE project_name = p.project_name AND source <> '' ORDER BY source
+			)), ''),
+			COALESCE((SELECT MAX(last_seen_at) FROM projects WHERE project_name = p.project_name), ''),
+			COALESCE((SELECT COUNT(*) FROM captures WHERE service_name = ? AND project_name = p.project_name), 0),
+			COALESCE((SELECT COUNT(*) FROM captures WHERE service_name = ? AND project_name = p.project_name AND completed = 1 AND is_test = 0), 0),
+			COALESCE((SELECT COUNT(*) FROM captures WHERE service_name = ? AND project_name = p.project_name AND completed = 1 AND is_test = 1), 0),
+			COALESCE((SELECT COUNT(*) FROM copied_files WHERE project_name = p.project_name), 0),
+			COALESCE((SELECT COUNT(*) FROM ead_records WHERE project_name = p.project_name), 0),
+			COALESCE((SELECT COUNT(*) FROM ead_processing_status WHERE project_name = p.project_name), 0),
+			COALESCE((SELECT capture_number FROM captures WHERE service_name = ? AND project_name = p.project_name AND completed = 1 AND is_test = 0 ORDER BY CAST(capture_number AS INTEGER) DESC, capture_number DESC LIMIT 1), ''),
+			COALESCE((SELECT capture_number FROM captures WHERE service_name = ? AND project_name = p.project_name AND completed = 1 AND is_test = 1 ORDER BY CAST(capture_number AS INTEGER) DESC, capture_number DESC LIMIT 1), '')
+		FROM project_names p
+		WHERE TRIM(p.project_name) <> ''
+		ORDER BY p.project_name ASC
+	`, aggregateCaptureServiceName, aggregateCaptureServiceName, aggregateCaptureServiceName, aggregateCaptureServiceName, aggregateCaptureServiceName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	summaries := make([]models.ProjectDatabaseSummary, 0)
+	for rows.Next() {
+		var summary models.ProjectDatabaseSummary
+		if err := rows.Scan(
+			&summary.Name,
+			&summary.Source,
+			&summary.LastSeenAt,
+			&summary.Captures,
+			&summary.CompletedCaptures,
+			&summary.CompletedTestCaptures,
+			&summary.CopiedFiles,
+			&summary.EADRecords,
+			&summary.EADProcessingRecords,
+			&summary.LastCaptureNumber,
+			&summary.LastTestCaptureNumber,
+		); err != nil {
+			return nil, err
+		}
+		summaries = append(summaries, summary)
+	}
+
+	return summaries, rows.Err()
+}
+
 func (s *Store) IsFileCopied(project, relativePath string, fileSize int64, modTime time.Time) (bool, error) {
 	if strings.TrimSpace(project) == "" || strings.TrimSpace(relativePath) == "" {
 		return false, nil
@@ -495,6 +551,88 @@ func (s *Store) ClearProjectHistory(project string) error {
 			    last_capture_number = '', last_test_capture_number = ''
 			WHERE project = ?
 		`, project)
+		return err
+	})
+}
+
+func (s *Store) DeleteProject(project string) error {
+	project = strings.TrimSpace(project)
+	if project == "" {
+		return nil
+	}
+
+	return s.withWriteTx(func(tx *sql.Tx) error {
+		var running int
+		if err := tx.QueryRow(`
+			SELECT COUNT(*) FROM sync_status
+			WHERE is_running = 1 AND project = ?
+		`, project).Scan(&running); err != nil {
+			return err
+		}
+		if running > 0 {
+			return fmt.Errorf("cannot delete project while sync is running")
+		}
+
+		if _, err := tx.Exec(`DELETE FROM projects WHERE project_name = ?`, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM copied_files WHERE project_name = ?`, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM capture_files WHERE project_name = ?`, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM captures WHERE project_name = ?`, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM ead_records WHERE project_name = ?`, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM ead_processing_status WHERE project_name = ?`, project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`
+			UPDATE sync_status
+			SET project = '', destination = '', max_parallelism = 0,
+			    completed_captures = 0, completed_test_captures = 0,
+			    last_capture_number = '', last_test_capture_number = '',
+			    updated_at = ?
+			WHERE project = ?
+		`, time.Now().UTC().Format(time.RFC3339Nano), project)
+		return err
+	})
+}
+
+func (s *Store) ClearDatabase() error {
+	return s.withWriteTx(func(tx *sql.Tx) error {
+		var running int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM sync_status WHERE is_running = 1`).Scan(&running); err != nil {
+			return err
+		}
+		if running > 0 {
+			return fmt.Errorf("cannot clear database while sync is running")
+		}
+
+		for _, query := range []string{
+			`DELETE FROM projects`,
+			`DELETE FROM copied_files`,
+			`DELETE FROM capture_files`,
+			`DELETE FROM captures`,
+			`DELETE FROM ead_records`,
+			`DELETE FROM ead_processing_status`,
+		} {
+			if _, err := tx.Exec(query); err != nil {
+				return err
+			}
+		}
+
+		_, err := tx.Exec(`
+			UPDATE sync_status
+			SET is_running = 0, project = '', destination = '', max_parallelism = 0,
+			    completed_captures = 0, completed_test_captures = 0,
+			    last_capture_number = '', last_test_capture_number = '',
+			    updated_at = ?
+		`, time.Now().UTC().Format(time.RFC3339Nano))
 		return err
 	})
 }

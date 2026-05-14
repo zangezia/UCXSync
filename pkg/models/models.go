@@ -85,6 +85,21 @@ type ProjectInfo struct {
 	Source string `json:"source"` // First node/share where found
 }
 
+// ProjectDatabaseSummary describes one project persisted in the local SQLite DB.
+type ProjectDatabaseSummary struct {
+	Name                  string `json:"name"`
+	Source                string `json:"source"`
+	LastSeenAt            string `json:"last_seen_at"`
+	Captures              int    `json:"captures"`
+	CompletedCaptures     int    `json:"completed_captures"`
+	CompletedTestCaptures int    `json:"completed_test_captures"`
+	CopiedFiles           int    `json:"copied_files"`
+	EADRecords            int    `json:"ead_records"`
+	EADProcessingRecords  int    `json:"ead_processing_records"`
+	LastCaptureNumber     string `json:"last_capture_number"`
+	LastTestCaptureNumber string `json:"last_test_capture_number"`
+}
+
 // DestinationInfo holds information about available destination paths
 type DestinationInfo struct {
 	Path        string  `json:"path"`

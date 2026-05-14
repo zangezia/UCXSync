@@ -101,6 +101,7 @@
                         <button id="stop-btn" class="btn btn-danger" disabled>⏹️ Остановить</button>
                         <button id="mount-shares-btn" class="btn btn-secondary">🔁 Смонтировать шары</button>
                         <button id="download-report-btn" class="btn btn-secondary" disabled>Скачать отчет</button>
+                        <button id="manage-db-btn" type="button" class="btn btn-secondary">База проектов</button>
                         <button id="restart-service-btn" class="btn btn-secondary">♻️ Перезапустить службу</button>
                         <button id="shutdown-host-btn" type="button" class="btn btn-danger">Завершение работы</button>
                     </div>
@@ -242,6 +243,42 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeDeviceModal()">Закрыть</button>
                 <button class="btn btn-primary" onclick="refreshDevices()">🔄 Обновить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Database Modal -->
+    <div id="database-modal" class="modal">
+        <div class="modal-content database-modal-content">
+            <div class="modal-header">
+                <h2>База проектов</h2>
+                <button class="modal-close" onclick="closeDatabaseModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="database-summary" id="database-summary">Загрузка...</div>
+                <div class="table-container">
+                    <table id="database-projects-table" class="database-projects-table">
+                        <thead>
+                            <tr>
+                                <th>Проект</th>
+                                <th>Источник</th>
+                                <th>Сводка</th>
+                                <th>Последний</th>
+                                <th>Действие</th>
+                            </tr>
+                        </thead>
+                        <tbody id="database-projects-body">
+                            <tr>
+                                <td colspan="5" class="no-data">Загрузка...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" id="clear-database-btn" type="button">Очистить всю базу</button>
+                <button class="btn btn-secondary" onclick="closeDatabaseModal()">Закрыть</button>
+                <button class="btn btn-primary" onclick="refreshDatabaseProjects()">Обновить</button>
             </div>
         </div>
     </div>
