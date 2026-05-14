@@ -22,6 +22,7 @@ import (
 	"github.com/zangezia/UCXSync/internal/ead"
 	"github.com/zangezia/UCXSync/internal/monitor"
 	"github.com/zangezia/UCXSync/internal/network"
+	"github.com/zangezia/UCXSync/internal/report"
 	"github.com/zangezia/UCXSync/internal/state"
 	syncService "github.com/zangezia/UCXSync/internal/sync"
 	"github.com/zangezia/UCXSync/pkg/models"
@@ -181,12 +182,14 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/host/shutdown", s.handleHostShutdown)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
 	mux.HandleFunc("/api/project-stats", s.handleGetProjectStats)
+	mux.HandleFunc("/api/project/report", s.handleDownloadProjectReport)
 	mux.HandleFunc("/api/project/clear-history", s.handleClearProjectHistory)
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("/api/preflight", s.handleGetPreflight)
 	mux.HandleFunc("/api/sync/start", s.handleStartSync)
 	mux.HandleFunc("/api/sync/stop", s.handleStopSync)
 	mux.HandleFunc("/api/dashboard/project-stats", s.handleDashboardProjectStats)
+	mux.HandleFunc("/api/dashboard/project/report", s.handleDownloadProjectReport)
 	mux.HandleFunc("/api/dashboard/config", s.handleDashboardConfig)
 	mux.HandleFunc("/api/dashboard/overview", s.handleDashboardOverview)
 	mux.HandleFunc("/api/dashboard/preflight", s.handleDashboardPreflight)
@@ -391,6 +394,60 @@ func (s *Server) handleDashboardProjectStats(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+func (s *Server) handleDownloadProjectReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	destination := strings.TrimSpace(r.URL.Query().Get("destination"))
+	if project == "" || destination == "" {
+		http.Error(w, "project and destination parameters required", http.StatusBadRequest)
+		return
+	}
+
+	filename, err := safeReportFilename(project)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	destinationPath, ok := s.allowedReportDestination(destination)
+	if !ok {
+		http.Error(w, "destination is not available", http.StatusNotFound)
+		return
+	}
+
+	reportPath := report.DefaultPath(destinationPath, project)
+	if filepath.Base(reportPath) != filename || !isPathWithin(destinationPath, reportPath) {
+		http.Error(w, "invalid report path", http.StatusBadRequest)
+		return
+	}
+
+	file, err := os.Open(reportPath)
+	if os.IsNotExist(err) {
+		http.Error(w, "report file not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Str("project", project).Str("path", reportPath).Msg("Failed to open project report")
+		http.Error(w, "failed to open report file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		http.Error(w, "report file not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, quoteHeaderFilename(filename)))
+	http.ServeContent(w, r, filename, info.ModTime(), file)
 }
 
 func (s *Server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
@@ -967,6 +1024,22 @@ func (s *Server) availableDestinations() []models.DestinationInfo {
 		return s.getDestinationsFunc()
 	}
 	return s.getAvailableDestinations()
+}
+
+func (s *Server) allowedReportDestination(destination string) (string, bool) {
+	destination = filepath.Clean(strings.TrimSpace(destination))
+	if destination == "" || destination == "." {
+		return "", false
+	}
+
+	for _, candidate := range s.availableDestinations() {
+		candidatePath := filepath.Clean(strings.TrimSpace(candidate.Path))
+		if candidatePath != "" && candidatePath == destination {
+			return candidatePath, true
+		}
+	}
+
+	return "", false
 }
 
 func (s *Server) requireNetworkRequirements() error {
@@ -2049,4 +2122,31 @@ func parseSizeToBytes(size string) uint64 {
 func isManagedDataDestination(destination string) bool {
 	clean := filepath.ToSlash(filepath.Clean(destination))
 	return clean == defaultDataMountPoint || strings.HasPrefix(clean, defaultDataMountPoint+"/")
+}
+
+func safeReportFilename(project string) (string, error) {
+	project = strings.TrimSpace(project)
+	if project == "" {
+		return "", fmt.Errorf("project parameter required")
+	}
+	if strings.ContainsAny(project, `/\`) || project == "." || project == ".." {
+		return "", fmt.Errorf("invalid project name")
+	}
+	return fmt.Sprintf("%s-ead-report.json", project), nil
+}
+
+func isPathWithin(root, path string) bool {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != "" && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
+}
+
+func quoteHeaderFilename(filename string) string {
+	filename = strings.ReplaceAll(filename, `\`, "_")
+	filename = strings.ReplaceAll(filename, `"`, "_")
+	return filename
 }

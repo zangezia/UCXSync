@@ -64,6 +64,7 @@ class UCXSyncApp {
         this.refreshBtn = document.getElementById('refresh-projects');
         this.manageDevicesBtn = document.getElementById('manage-devices-btn');
         this.mountSharesBtn = document.getElementById('mount-shares-btn');
+        this.downloadReportBtn = document.getElementById('download-report-btn');
         this.restartServiceBtn = document.getElementById('restart-service-btn');
         this.shutdownHostBtn = document.getElementById('shutdown-host-btn');
         this.preflightPanel = document.getElementById('preflight-panel');
@@ -148,6 +149,7 @@ class UCXSyncApp {
         });
 
         this.manageDevicesBtn.addEventListener('click', () => this.openDeviceModal());
+        this.downloadReportBtn?.addEventListener('click', () => this.downloadProjectReport());
         this.mountSharesBtn.addEventListener('click', () => {
             if (this.mode === 'dashboard') {
                 this.mountDashboardShares();
@@ -179,6 +181,7 @@ class UCXSyncApp {
         // Auto-save settings and refresh stats on project change
         this.projectSelect.addEventListener('change', () => {
             this.saveSettings();
+            this.updateControlsState();
             if (!this.isRunning) this.loadProjectStats();
             if (this.mode === 'dashboard') {
                 this.refreshDashboardPreflight({ silent: true }).catch(() => {});
@@ -188,6 +191,7 @@ class UCXSyncApp {
         });
         this.destinationSelect.addEventListener('change', () => {
             this.saveSettings();
+            this.updateControlsState();
             if (this.mode === 'dashboard') {
                 this.refreshDashboardPreflight({ silent: true }).catch(() => {});
             } else {
@@ -560,6 +564,7 @@ class UCXSyncApp {
         if (previousValue) {
             this.destinationSelect.value = previousValue;
         }
+        this.updateControlsState();
     }
 
     async startSync() {
@@ -695,9 +700,28 @@ class UCXSyncApp {
         this.projectSelect.disabled = this.isRunning;
         this.destinationSelect.disabled = this.isRunning;
         this.parallelismInput.disabled = this.isRunning;
+        if (this.downloadReportBtn) {
+            this.downloadReportBtn.disabled = !this.projectSelect.value || !this.getCurrentDestination();
+        }
         if (this.forceFullResyncCheckbox) {
             this.forceFullResyncCheckbox.disabled = this.isRunning;
         }
+    }
+
+    downloadProjectReport() {
+        const project = this.projectSelect.value;
+        const destination = this.getCurrentDestination();
+        if (!project || !destination) {
+            this.log('Выберите проект и диск назначения перед скачиванием отчета', 'warn');
+            return;
+        }
+
+        const endpoint = this.mode === 'dashboard'
+            ? '/api/dashboard/project/report'
+            : '/api/project/report';
+        const query = new URLSearchParams({ project, destination });
+        window.location.href = `${endpoint}?${query.toString()}`;
+        this.log('Скачивание отчета запрошено', 'info');
     }
 
     async mountShares() {

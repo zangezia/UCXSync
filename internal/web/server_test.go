@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -430,6 +432,55 @@ func TestHandleGetPreflightReturnsJSON(t *testing.T) {
 	}
 	if payload.SelectedProject != "ProjA" {
 		t.Fatalf("SelectedProject = %q, want ProjA", payload.SelectedProject)
+	}
+}
+
+func TestHandleDownloadProjectReportServesSelectedDestinationReport(t *testing.T) {
+	t.Parallel()
+
+	destination := t.TempDir()
+	reportBody := []byte(`{"project":"ProjA","record_count":1}`)
+	if err := os.WriteFile(filepath.Join(destination, "ProjA-ead-report.json"), reportBody, 0644); err != nil {
+		t.Fatalf("write report fixture: %v", err)
+	}
+
+	server := &Server{
+		getDestinationsFunc: func() []models.DestinationInfo {
+			return []models.DestinationInfo{{Path: destination, Type: "usb"}}
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/project/report?project=ProjA&destination="+url.QueryEscape(destination), nil)
+	resp := httptest.NewRecorder()
+
+	server.handleDownloadProjectReport(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", resp.Code, resp.Body.String())
+	}
+	if got := strings.TrimSpace(resp.Body.String()); got != string(reportBody) {
+		t.Fatalf("body = %q, want %q", got, string(reportBody))
+	}
+	if disposition := resp.Header().Get("Content-Disposition"); !strings.Contains(disposition, "ProjA-ead-report.json") {
+		t.Fatalf("Content-Disposition = %q, want report filename", disposition)
+	}
+}
+
+func TestHandleDownloadProjectReportRejectsUnsafeProject(t *testing.T) {
+	t.Parallel()
+
+	destination := t.TempDir()
+	server := &Server{
+		getDestinationsFunc: func() []models.DestinationInfo {
+			return []models.DestinationInfo{{Path: destination, Type: "usb"}}
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/project/report?project=..%2Fsecret&destination="+url.QueryEscape(destination), nil)
+	resp := httptest.NewRecorder()
+
+	server.handleDownloadProjectReport(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.Code)
 	}
 }
 
