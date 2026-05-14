@@ -477,10 +477,41 @@ func TestStoreRecordsEADProcessingFailure(t *testing.T) {
 
 	store := newTestStore(t)
 	modTime := time.Unix(1710002222, 0).UTC()
+	relativePath := "ead/bad.xml"
+
+	if err := store.SaveEADProcessing(EADRecord{
+		ProjectName:         "ProjA",
+		RelativePath:        relativePath,
+		CaptureNumber:       "00027",
+		EADProjectName:      "ProjA",
+		RecordGUID:          "ABC",
+		SessionID:           "ABC",
+		LineNumber:          1,
+		SegmentNumber:       1,
+		WaypointNumber:      1,
+		ExposureNumber:      27,
+		CapturedAt:          time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
+		Latitude:            1,
+		Longitude:           2,
+		Altitude:            3,
+		TrackOverGround:     4,
+		GroundSpeed:         5,
+		Software:            "COSa",
+		Aperture:            "F 8",
+		ExposureTimeSeconds: 0.001,
+	}, EADProcessingStatus{
+		ProjectName:  "ProjA",
+		RelativePath: relativePath,
+		FileSize:     100,
+		ModTime:      modTime,
+		Status:       "success",
+	}); err != nil {
+		t.Fatalf("SaveEADProcessing returned error: %v", err)
+	}
 
 	if err := store.RecordEADProcessingFailure(EADProcessingStatus{
 		ProjectName:    "ProjA",
-		RelativePath:   "ead/bad.xml",
+		RelativePath:   relativePath,
 		FileSize:       77,
 		ModTime:        modTime,
 		Status:         "error",

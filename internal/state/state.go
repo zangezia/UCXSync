@@ -789,29 +789,42 @@ func (s *Store) RecordEADProcessingFailure(processing EADProcessingStatus) error
 		processedAt = time.Now().UTC()
 	}
 
-	return s.execWrite(`
-		INSERT INTO ead_processing_status (
-			project_name, relative_path, file_size, mod_time_unix_ns,
-			status, warning_message, error_message, processed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(project_name, relative_path)
-		DO UPDATE SET
-			file_size = excluded.file_size,
-			mod_time_unix_ns = excluded.mod_time_unix_ns,
-			status = excluded.status,
-			warning_message = excluded.warning_message,
-			error_message = excluded.error_message,
-			processed_at = excluded.processed_at
-	`,
-		processing.ProjectName,
-		normalizeRelativePath(processing.RelativePath),
-		processing.FileSize,
-		processing.ModTime.UTC().UnixNano(),
-		normalizeEADProcessingState(processing.Status),
-		strings.TrimSpace(processing.WarningMessage),
-		strings.TrimSpace(processing.ErrorMessage),
-		processedAt.Format(time.RFC3339Nano),
-	)
+	return s.withWriteTx(func(tx *sql.Tx) error {
+		project := strings.TrimSpace(processing.ProjectName)
+		relativePath := normalizeRelativePath(processing.RelativePath)
+
+		if _, err := tx.Exec(`
+			DELETE FROM ead_records
+			WHERE project_name = ? AND relative_path = ?
+		`, project, relativePath); err != nil {
+			return err
+		}
+
+		_, err := tx.Exec(`
+			INSERT INTO ead_processing_status (
+				project_name, relative_path, file_size, mod_time_unix_ns,
+				status, warning_message, error_message, processed_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(project_name, relative_path)
+			DO UPDATE SET
+				file_size = excluded.file_size,
+				mod_time_unix_ns = excluded.mod_time_unix_ns,
+				status = excluded.status,
+				warning_message = excluded.warning_message,
+				error_message = excluded.error_message,
+				processed_at = excluded.processed_at
+		`,
+			project,
+			relativePath,
+			processing.FileSize,
+			processing.ModTime.UTC().UnixNano(),
+			normalizeEADProcessingState(processing.Status),
+			strings.TrimSpace(processing.WarningMessage),
+			strings.TrimSpace(processing.ErrorMessage),
+			processedAt.Format(time.RFC3339Nano),
+		)
+		return err
+	})
 }
 
 func (s *Store) LoadEADRecord(project, relativePath string) (EADRecord, bool, error) {
@@ -931,7 +944,10 @@ func (s *Store) ListCompletedEADRecords(project string) ([]EADRecord, error) {
 			ON c.service_name = ?
 			AND c.project_name = e.project_name
 			AND c.capture_number = e.capture_number
-		WHERE e.project_name = ? AND c.completed = 1
+		INNER JOIN ead_processing_status eps
+			ON eps.project_name = e.project_name
+			AND eps.relative_path = e.relative_path
+		WHERE e.project_name = ? AND c.completed = 1 AND eps.status = 'success'
 		ORDER BY CAST(e.capture_number AS INTEGER) ASC, e.line_number ASC, e.waypoint_number ASC, e.exposure_number ASC
 	`, aggregateCaptureServiceName, project)
 	if err != nil {

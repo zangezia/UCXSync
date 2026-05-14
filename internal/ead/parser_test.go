@@ -104,6 +104,45 @@ func TestParseAllowsOptionalAboveGroundLevelOmission(t *testing.T) {
 	}
 }
 
+func TestParseAllowsZeroValuedNavigationFields(t *testing.T) {
+	t.Parallel()
+
+	xmlData := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<exposure_annotation_data>
+	<image_number>27</image_number>
+	<record_guid>FF4070C7-B7E0-40E5-B7F3-F8C00FD4AFE4</record_guid>
+	<software>COSa V4.5.5</software>
+	<aperture description="F 8">1</aperture>
+	<exposure_time>0.002</exposure_time>
+	<exposure_annotation_info>
+		<fms_info>
+			<exposure_number>27</exposure_number>
+			<project_name>Vologda_2k</project_name>
+			<line_number>19</line_number>
+			<segment_number>1</segment_number>
+			<waypoint_number>8</waypoint_number>
+		</fms_info>
+		<gps_navigation_info>
+			<date>250903</date>
+			<time>045431</time>
+			<latitude>N0</latitude>
+			<longitude>E0</longitude>
+			<altitude>0</altitude>
+			<track_over_ground>0</track_over_ground>
+			<ground_speed>0</ground_speed>
+		</gps_navigation_info>
+	</exposure_annotation_info>
+</exposure_annotation_data>`)
+
+	record, _, err := Parse(xmlData, "EAD-00027-ProjA-ABC.xml")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if record.Latitude != 0 || record.Longitude != 0 || record.Altitude != 0 || record.TrackOverGround != 0 || record.GroundSpeed != 0 {
+		t.Fatalf("expected zero-valued navigation fields to be preserved, got %+v", record)
+	}
+}
+
 func TestParseMalformedXMLReturnsStructuredError(t *testing.T) {
 	t.Parallel()
 

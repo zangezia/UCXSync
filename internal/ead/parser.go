@@ -253,18 +253,6 @@ func validateRecord(record Record) error {
 	if record.CapturedAt.IsZero() {
 		return fmt.Errorf("missing required timestamp")
 	}
-	if record.Latitude == 0 && record.Longitude == 0 {
-		return fmt.Errorf("missing required coordinates")
-	}
-	if record.Altitude == 0 {
-		return fmt.Errorf("missing required altitude")
-	}
-	if record.TrackOverGround == 0 {
-		return fmt.Errorf("missing required track_over_ground")
-	}
-	if record.GroundSpeed == 0 {
-		return fmt.Errorf("missing required ground_speed")
-	}
 	if record.ExposureTimeSeconds <= 0 {
 		return fmt.Errorf("missing required exposure_time")
 	}
