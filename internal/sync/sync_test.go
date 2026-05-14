@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +13,22 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/zangezia/UCXSync/internal/state"
 )
+
+type copiedFileProcessorStub struct {
+	mu     sync.Mutex
+	callN  int
+	events []CopiedFileEvent
+	err    error
+}
+
+func (s *copiedFileProcessorStub) ProcessCopiedFile(_ context.Context, event CopiedFileEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.callN++
+	s.events = append(s.events, event)
+	return s.err
+}
 
 // TestGlobalSemaphore verifies that globalSemaphore limits concurrent operations
 func TestGlobalSemaphore(t *testing.T) {
@@ -669,5 +686,239 @@ func TestStopDoesNotDeadlockWhileTasksCleanup(t *testing.T) {
 
 	if len(svc.activeTasks) != 0 {
 		t.Fatalf("expected activeTasks to be empty after Stop, got %d", len(svc.activeTasks))
+	}
+}
+
+func TestCopyFileInvokesCopiedFileProcessorForEAD(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	sourceRoot := filepath.Join(baseDir, "source")
+	destRoot := filepath.Join(baseDir, "dest")
+	if err := os.MkdirAll(sourceRoot, 0755); err != nil {
+		t.Fatalf("failed to create source root: %v", err)
+	}
+	if err := os.MkdirAll(destRoot, 0755); err != nil {
+		t.Fatalf("failed to create destination root: %v", err)
+	}
+
+	store, err := state.New(filepath.Join(baseDir, "state.db"), "ucxsync-test")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	svc := New([]string{"CU"}, []string{"E$"}, "/ucmount")
+	if err := svc.SetStateStore(store); err != nil {
+		t.Fatalf("SetStateStore returned error: %v", err)
+	}
+	svc.mu.Lock()
+	svc.project = "ProjA"
+	svc.globalSemaphore = make(chan struct{}, 1)
+	svc.mu.Unlock()
+
+	processor := &copiedFileProcessorStub{}
+	svc.SetCopiedFileProcessor(processor)
+
+	filename := "EAD-00027-ProjA-FF4070C7_B7E0_40E5_B7F3_F8C00FD4AFE4.xml"
+	sourcePath := filepath.Join(sourceRoot, filename)
+	if err := os.WriteFile(sourcePath, []byte(`<exposure_annotation_data></exposure_annotation_data>`), 0644); err != nil {
+		t.Fatalf("failed to write source file: %v", err)
+	}
+
+	task := &taskInfo{node: "CU", share: "E$"}
+	if err := svc.copyFile(context.Background(), task, sourcePath, sourceRoot, destRoot); err != nil {
+		t.Fatalf("copyFile returned error: %v", err)
+	}
+
+	if processor.callN != 1 {
+		t.Fatalf("processor call count = %d, want 1", processor.callN)
+	}
+	if len(processor.events) != 1 {
+		t.Fatalf("events length = %d, want 1", len(processor.events))
+	}
+	if processor.events[0].RelativePath != filename {
+		t.Fatalf("RelativePath = %q, want %q", processor.events[0].RelativePath, filename)
+	}
+}
+
+func TestCopyFileSkipsCopiedFileProcessorForNonEAD(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	sourceRoot := filepath.Join(baseDir, "source")
+	destRoot := filepath.Join(baseDir, "dest")
+	if err := os.MkdirAll(sourceRoot, 0755); err != nil {
+		t.Fatalf("failed to create source root: %v", err)
+	}
+	if err := os.MkdirAll(destRoot, 0755); err != nil {
+		t.Fatalf("failed to create destination root: %v", err)
+	}
+
+	store, err := state.New(filepath.Join(baseDir, "state.db"), "ucxsync-test")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	svc := New([]string{"WU01"}, []string{"E$"}, "/ucmount")
+	if err := svc.SetStateStore(store); err != nil {
+		t.Fatalf("SetStateStore returned error: %v", err)
+	}
+	svc.mu.Lock()
+	svc.project = "ProjA"
+	svc.requiredSensors = map[string]struct{}{"00-00": {}}
+	svc.globalSemaphore = make(chan struct{}, 1)
+	svc.mu.Unlock()
+
+	processor := &copiedFileProcessorStub{}
+	svc.SetCopiedFileProcessor(processor)
+
+	filename := "Lvl0X-00001-ProjA-00-00-ABCDEF01_2345_6789_ABCD_EF0123456789.raw"
+	sourcePath := filepath.Join(sourceRoot, filename)
+	if err := os.WriteFile(sourcePath, []byte("raw payload"), 0644); err != nil {
+		t.Fatalf("failed to write source file: %v", err)
+	}
+
+	task := &taskInfo{node: "WU01", share: "E$"}
+	if err := svc.copyFile(context.Background(), task, sourcePath, sourceRoot, destRoot); err != nil {
+		t.Fatalf("copyFile returned error: %v", err)
+	}
+
+	if processor.callN != 0 {
+		t.Fatalf("processor call count = %d, want 0", processor.callN)
+	}
+}
+
+func TestCopyFileProcessorFailureDoesNotFailCopy(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	sourceRoot := filepath.Join(baseDir, "source")
+	destRoot := filepath.Join(baseDir, "dest")
+	if err := os.MkdirAll(sourceRoot, 0755); err != nil {
+		t.Fatalf("failed to create source root: %v", err)
+	}
+	if err := os.MkdirAll(destRoot, 0755); err != nil {
+		t.Fatalf("failed to create destination root: %v", err)
+	}
+
+	store, err := state.New(filepath.Join(baseDir, "state.db"), "ucxsync-test")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	svc := New([]string{"CU"}, []string{"E$"}, "/ucmount")
+	if err := svc.SetStateStore(store); err != nil {
+		t.Fatalf("SetStateStore returned error: %v", err)
+	}
+	svc.mu.Lock()
+	svc.project = "ProjA"
+	svc.globalSemaphore = make(chan struct{}, 1)
+	svc.mu.Unlock()
+
+	processor := &copiedFileProcessorStub{err: fmt.Errorf("boom")}
+	svc.SetCopiedFileProcessor(processor)
+
+	filename := "EAD-00027-ProjA-FF4070C7_B7E0_40E5_B7F3_F8C00FD4AFE4.xml"
+	sourcePath := filepath.Join(sourceRoot, filename)
+	if err := os.WriteFile(sourcePath, []byte(`<exposure_annotation_data></exposure_annotation_data>`), 0644); err != nil {
+		t.Fatalf("failed to write source file: %v", err)
+	}
+
+	task := &taskInfo{node: "CU", share: "E$"}
+	if err := svc.copyFile(context.Background(), task, sourcePath, sourceRoot, destRoot); err != nil {
+		t.Fatalf("copyFile returned error: %v", err)
+	}
+
+	if task.copiedFiles != 1 {
+		t.Fatalf("copiedFiles = %d, want 1", task.copiedFiles)
+	}
+
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		t.Fatalf("failed to stat source file: %v", err)
+	}
+	copied, err := store.IsFileCopied("ProjA", filename, info.Size(), info.ModTime())
+	if err != nil {
+		t.Fatalf("IsFileCopied returned error: %v", err)
+	}
+	if !copied {
+		t.Fatal("expected copied file state to remain persisted despite processor failure")
+	}
+}
+
+func TestCopyFileInvokesProcessorWhenNonEADCompletesCapture(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	sourceRoot := filepath.Join(baseDir, "source")
+	destRoot := filepath.Join(baseDir, "dest")
+	if err := os.MkdirAll(sourceRoot, 0755); err != nil {
+		t.Fatalf("failed to create source root: %v", err)
+	}
+	if err := os.MkdirAll(destRoot, 0755); err != nil {
+		t.Fatalf("failed to create destination root: %v", err)
+	}
+
+	store, err := state.New(filepath.Join(baseDir, "state.db"), "ucxsync-test")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	svc := New([]string{"WU01", "CU"}, []string{"E$"}, "/ucmount")
+	if err := svc.SetStateStore(store); err != nil {
+		t.Fatalf("SetStateStore returned error: %v", err)
+	}
+	if _, err := store.StartRun("ProjA", destRoot, 1); err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	svc.mu.Lock()
+	svc.project = "ProjA"
+	svc.requiredSensors = map[string]struct{}{"00-00": {}}
+	svc.globalSemaphore = make(chan struct{}, 1)
+	svc.mu.Unlock()
+
+	processor := &copiedFileProcessorStub{}
+	svc.SetCopiedFileProcessor(processor)
+
+	rawFile := filepath.Join(sourceRoot, "Lvl00-00027-ProjA-00-00-FF4070C7_B7E0_40E5_B7F3_F8C00FD4AFE4.raw")
+	if err := os.WriteFile(rawFile, []byte("raw"), 0644); err != nil {
+		t.Fatalf("failed to write RAW file: %v", err)
+	}
+	eadFile := filepath.Join(sourceRoot, "EAD-00027-ProjA-FF4070C7_B7E0_40E5_B7F3_F8C00FD4AFE4.xml")
+	if err := os.WriteFile(eadFile, []byte(`<exposure_annotation_data></exposure_annotation_data>`), 0644); err != nil {
+		t.Fatalf("failed to write EAD file: %v", err)
+	}
+	rawQvFile := filepath.Join(sourceRoot, "RawQv-00027-ProjA-FF4070C7_B7E0_40E5_B7F3_F8C00FD4AFE4.dat")
+	if err := os.WriteFile(rawQvFile, []byte("dat"), 0644); err != nil {
+		t.Fatalf("failed to write RawQv file: %v", err)
+	}
+
+	task := &taskInfo{node: "WU01", share: "E$"}
+	if err := svc.copyFile(context.Background(), task, rawFile, sourceRoot, destRoot); err != nil {
+		t.Fatalf("copy RAW returned error: %v", err)
+	}
+	if processor.callN != 0 {
+		t.Fatalf("processor call count after RAW = %d, want 0", processor.callN)
+	}
+
+	if err := svc.copyFile(context.Background(), task, eadFile, sourceRoot, destRoot); err != nil {
+		t.Fatalf("copy EAD returned error: %v", err)
+	}
+	if processor.callN != 1 {
+		t.Fatalf("processor call count after EAD = %d, want 1", processor.callN)
+	}
+
+	if err := svc.copyFile(context.Background(), task, rawQvFile, sourceRoot, destRoot); err != nil {
+		t.Fatalf("copy RawQv returned error: %v", err)
+	}
+	if processor.callN != 2 {
+		t.Fatalf("processor call count after completion = %d, want 2", processor.callN)
+	}
+	if processor.events[1].RelativePath != filepath.Base(rawQvFile) {
+		t.Fatalf("completion-trigger event = %q, want RawQv file path", processor.events[1].RelativePath)
 	}
 }

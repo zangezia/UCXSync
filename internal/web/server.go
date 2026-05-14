@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 	"github.com/zangezia/UCXSync/internal/config"
+	"github.com/zangezia/UCXSync/internal/ead"
 	"github.com/zangezia/UCXSync/internal/monitor"
 	"github.com/zangezia/UCXSync/internal/network"
 	"github.com/zangezia/UCXSync/internal/state"
@@ -111,6 +112,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		store.Close()
 		return nil, err
 	}
+	svc.SetCopiedFileProcessor(ead.NewProcessor(store))
 
 	monService := monitor.New(
 		cfg.Monitoring.PerformanceUpdateInterval,

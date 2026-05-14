@@ -48,6 +48,41 @@ type CaptureObservation struct {
 	RequireDAT       bool
 }
 
+type EADRecord struct {
+	ProjectName         string
+	RelativePath        string
+	CaptureNumber       string
+	EADProjectName      string
+	Area                string
+	RecordGUID          string
+	SessionID           string
+	LineNumber          int
+	SegmentNumber       int
+	WaypointNumber      int
+	ExposureNumber      int
+	CapturedAt          time.Time
+	Latitude            float64
+	Longitude           float64
+	Altitude            float64
+	AboveGroundLevel    *float64
+	TrackOverGround     float64
+	GroundSpeed         float64
+	Software            string
+	Aperture            string
+	ExposureTimeSeconds float64
+}
+
+type EADProcessingStatus struct {
+	ProjectName    string
+	RelativePath   string
+	FileSize       int64
+	ModTime        time.Time
+	Status         string
+	WarningMessage string
+	ErrorMessage   string
+	ProcessedAt    time.Time
+}
+
 func New(path, serviceName string) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("sqlite path must not be empty")
@@ -153,6 +188,42 @@ func (s *Store) init() error {
 			copied_at TEXT NOT NULL,
 			PRIMARY KEY(project_name, relative_path)
 		);`,
+		`CREATE TABLE IF NOT EXISTS ead_records (
+			project_name TEXT NOT NULL CHECK(TRIM(project_name) <> ''),
+			relative_path TEXT NOT NULL CHECK(TRIM(relative_path) <> ''),
+			capture_number TEXT NOT NULL,
+			ead_project_name TEXT NOT NULL,
+			area TEXT NOT NULL DEFAULT '',
+			record_guid TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			line_number INTEGER NOT NULL,
+			segment_number INTEGER NOT NULL,
+			waypoint_number INTEGER NOT NULL,
+			exposure_number INTEGER NOT NULL,
+			captured_at TEXT NOT NULL,
+			latitude REAL NOT NULL,
+			longitude REAL NOT NULL,
+			altitude REAL NOT NULL,
+			above_ground_level REAL,
+			track_over_ground REAL NOT NULL,
+			ground_speed REAL NOT NULL,
+			software TEXT NOT NULL DEFAULT '',
+			aperture TEXT NOT NULL DEFAULT '',
+			exposure_time_seconds REAL NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(project_name, relative_path)
+		);`,
+		`CREATE TABLE IF NOT EXISTS ead_processing_status (
+			project_name TEXT NOT NULL CHECK(TRIM(project_name) <> ''),
+			relative_path TEXT NOT NULL CHECK(TRIM(relative_path) <> ''),
+			file_size INTEGER NOT NULL DEFAULT 0,
+			mod_time_unix_ns INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL,
+			warning_message TEXT NOT NULL DEFAULT '',
+			error_message TEXT NOT NULL DEFAULT '',
+			processed_at TEXT NOT NULL,
+			PRIMARY KEY(project_name, relative_path)
+		);`,
 	}
 
 	for _, stmt := range ddl {
@@ -161,7 +232,46 @@ func (s *Store) init() error {
 		}
 	}
 
+	if err := s.ensureColumnExists("ead_records", "area", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+
 	return s.ensureStatusRow()
+}
+
+func (s *Store) ensureColumnExists(tableName, columnName, columnDefinition string) error {
+	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
+	if err != nil {
+		return fmt.Errorf("failed to inspect sqlite schema for %s: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid      int
+			name     string
+			colType  string
+			notNull  int
+			defaultV sql.NullString
+			pk       int
+		)
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultV, &pk); err != nil {
+			return fmt.Errorf("failed to scan sqlite schema for %s: %w", tableName, err)
+		}
+		if strings.EqualFold(name, columnName) {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to iterate sqlite schema for %s: %w", tableName, err)
+	}
+
+	statement := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, tableName, columnName, columnDefinition)
+	if _, err := s.db.Exec(statement); err != nil {
+		return fmt.Errorf("failed to add sqlite column %s.%s: %w", tableName, columnName, err)
+	}
+
+	return nil
 }
 
 func (s *Store) ensureStatusRow() error {
@@ -573,6 +683,309 @@ func (s *Store) LoadProjectStatus(project string) (models.PersistedCaptureStatus
 	}, nil
 }
 
+func (s *Store) SaveEADProcessing(record EADRecord, processing EADProcessingStatus) error {
+	return s.withWriteTx(func(tx *sql.Tx) error {
+		processedAt := processing.ProcessedAt.UTC()
+		if processedAt.IsZero() {
+			processedAt = time.Now().UTC()
+		}
+
+		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		capturedAt := record.CapturedAt.UTC().Format(time.RFC3339Nano)
+
+		var aboveGroundLevel any
+		if record.AboveGroundLevel != nil {
+			aboveGroundLevel = *record.AboveGroundLevel
+		}
+
+		_, err := tx.Exec(`
+			INSERT INTO ead_records (
+				project_name, relative_path, capture_number, ead_project_name,
+				area, record_guid, session_id, line_number, segment_number, waypoint_number,
+				exposure_number, captured_at, latitude, longitude, altitude,
+				above_ground_level, track_over_ground, ground_speed, software,
+				aperture, exposure_time_seconds, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(project_name, relative_path)
+			DO UPDATE SET
+				capture_number = excluded.capture_number,
+				ead_project_name = excluded.ead_project_name,
+				area = excluded.area,
+				record_guid = excluded.record_guid,
+				session_id = excluded.session_id,
+				line_number = excluded.line_number,
+				segment_number = excluded.segment_number,
+				waypoint_number = excluded.waypoint_number,
+				exposure_number = excluded.exposure_number,
+				captured_at = excluded.captured_at,
+				latitude = excluded.latitude,
+				longitude = excluded.longitude,
+				altitude = excluded.altitude,
+				above_ground_level = excluded.above_ground_level,
+				track_over_ground = excluded.track_over_ground,
+				ground_speed = excluded.ground_speed,
+				software = excluded.software,
+				aperture = excluded.aperture,
+				exposure_time_seconds = excluded.exposure_time_seconds,
+				updated_at = excluded.updated_at
+		`,
+			record.ProjectName,
+			normalizeRelativePath(record.RelativePath),
+			record.CaptureNumber,
+			record.EADProjectName,
+			record.Area,
+			record.RecordGUID,
+			record.SessionID,
+			record.LineNumber,
+			record.SegmentNumber,
+			record.WaypointNumber,
+			record.ExposureNumber,
+			capturedAt,
+			record.Latitude,
+			record.Longitude,
+			record.Altitude,
+			aboveGroundLevel,
+			record.TrackOverGround,
+			record.GroundSpeed,
+			record.Software,
+			record.Aperture,
+			record.ExposureTimeSeconds,
+			updatedAt,
+		)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(`
+			INSERT INTO ead_processing_status (
+				project_name, relative_path, file_size, mod_time_unix_ns,
+				status, warning_message, error_message, processed_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(project_name, relative_path)
+			DO UPDATE SET
+				file_size = excluded.file_size,
+				mod_time_unix_ns = excluded.mod_time_unix_ns,
+				status = excluded.status,
+				warning_message = excluded.warning_message,
+				error_message = excluded.error_message,
+				processed_at = excluded.processed_at
+		`,
+			processing.ProjectName,
+			normalizeRelativePath(processing.RelativePath),
+			processing.FileSize,
+			processing.ModTime.UTC().UnixNano(),
+			normalizeEADProcessingState(processing.Status),
+			strings.TrimSpace(processing.WarningMessage),
+			strings.TrimSpace(processing.ErrorMessage),
+			processedAt.Format(time.RFC3339Nano),
+		)
+		return err
+	})
+}
+
+func (s *Store) RecordEADProcessingFailure(processing EADProcessingStatus) error {
+	processedAt := processing.ProcessedAt.UTC()
+	if processedAt.IsZero() {
+		processedAt = time.Now().UTC()
+	}
+
+	return s.execWrite(`
+		INSERT INTO ead_processing_status (
+			project_name, relative_path, file_size, mod_time_unix_ns,
+			status, warning_message, error_message, processed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(project_name, relative_path)
+		DO UPDATE SET
+			file_size = excluded.file_size,
+			mod_time_unix_ns = excluded.mod_time_unix_ns,
+			status = excluded.status,
+			warning_message = excluded.warning_message,
+			error_message = excluded.error_message,
+			processed_at = excluded.processed_at
+	`,
+		processing.ProjectName,
+		normalizeRelativePath(processing.RelativePath),
+		processing.FileSize,
+		processing.ModTime.UTC().UnixNano(),
+		normalizeEADProcessingState(processing.Status),
+		strings.TrimSpace(processing.WarningMessage),
+		strings.TrimSpace(processing.ErrorMessage),
+		processedAt.Format(time.RFC3339Nano),
+	)
+}
+
+func (s *Store) LoadEADRecord(project, relativePath string) (EADRecord, bool, error) {
+	var (
+		record           EADRecord
+		capturedAtRaw    string
+		aboveGroundLevel sql.NullFloat64
+	)
+
+	err := s.db.QueryRow(`
+		SELECT
+			project_name, relative_path, capture_number, ead_project_name,
+			area, record_guid, session_id, line_number, segment_number, waypoint_number,
+			exposure_number, captured_at, latitude, longitude, altitude,
+			above_ground_level, track_over_ground, ground_speed, software,
+			aperture, exposure_time_seconds
+		FROM ead_records
+		WHERE project_name = ? AND relative_path = ?
+	`, project, normalizeRelativePath(relativePath)).Scan(
+		&record.ProjectName,
+		&record.RelativePath,
+		&record.CaptureNumber,
+		&record.EADProjectName,
+		&record.Area,
+		&record.RecordGUID,
+		&record.SessionID,
+		&record.LineNumber,
+		&record.SegmentNumber,
+		&record.WaypointNumber,
+		&record.ExposureNumber,
+		&capturedAtRaw,
+		&record.Latitude,
+		&record.Longitude,
+		&record.Altitude,
+		&aboveGroundLevel,
+		&record.TrackOverGround,
+		&record.GroundSpeed,
+		&record.Software,
+		&record.Aperture,
+		&record.ExposureTimeSeconds,
+	)
+	if err == sql.ErrNoRows {
+		return EADRecord{}, false, nil
+	}
+	if err != nil {
+		return EADRecord{}, false, err
+	}
+
+	if capturedAtRaw != "" {
+		record.CapturedAt, err = time.Parse(time.RFC3339Nano, capturedAtRaw)
+		if err != nil {
+			return EADRecord{}, false, err
+		}
+	}
+	if aboveGroundLevel.Valid {
+		record.AboveGroundLevel = &aboveGroundLevel.Float64
+	}
+
+	return record, true, nil
+}
+
+func (s *Store) LoadEADProcessingStatus(project, relativePath string) (EADProcessingStatus, bool, error) {
+	var (
+		status         EADProcessingStatus
+		processedAtRaw string
+		modTimeUnixNS  int64
+	)
+
+	err := s.db.QueryRow(`
+		SELECT
+			project_name, relative_path, file_size, mod_time_unix_ns,
+			status, warning_message, error_message, processed_at
+		FROM ead_processing_status
+		WHERE project_name = ? AND relative_path = ?
+	`, project, normalizeRelativePath(relativePath)).Scan(
+		&status.ProjectName,
+		&status.RelativePath,
+		&status.FileSize,
+		&modTimeUnixNS,
+		&status.Status,
+		&status.WarningMessage,
+		&status.ErrorMessage,
+		&processedAtRaw,
+	)
+	if err == sql.ErrNoRows {
+		return EADProcessingStatus{}, false, nil
+	}
+	if err != nil {
+		return EADProcessingStatus{}, false, err
+	}
+
+	status.ModTime = time.Unix(0, modTimeUnixNS).UTC()
+	if processedAtRaw != "" {
+		status.ProcessedAt, err = time.Parse(time.RFC3339Nano, processedAtRaw)
+		if err != nil {
+			return EADProcessingStatus{}, false, err
+		}
+	}
+
+	return status, true, nil
+}
+
+func (s *Store) ListCompletedEADRecords(project string) ([]EADRecord, error) {
+	if strings.TrimSpace(project) == "" {
+		return nil, nil
+	}
+
+	rows, err := s.db.Query(`
+		SELECT
+			e.project_name, e.relative_path, e.capture_number, e.ead_project_name,
+			e.area, e.record_guid, e.session_id, e.line_number, e.segment_number,
+			e.waypoint_number, e.exposure_number, e.captured_at, e.latitude,
+			e.longitude, e.altitude, e.above_ground_level, e.track_over_ground,
+			e.ground_speed, e.software, e.aperture, e.exposure_time_seconds
+		FROM ead_records e
+		INNER JOIN captures c
+			ON c.service_name = ?
+			AND c.project_name = e.project_name
+			AND c.capture_number = e.capture_number
+		WHERE e.project_name = ? AND c.completed = 1
+		ORDER BY CAST(e.capture_number AS INTEGER) ASC, e.line_number ASC, e.waypoint_number ASC, e.exposure_number ASC
+	`, aggregateCaptureServiceName, project)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]EADRecord, 0)
+	for rows.Next() {
+		var (
+			record        EADRecord
+			capturedAtRaw string
+			agl           sql.NullFloat64
+		)
+		if err := rows.Scan(
+			&record.ProjectName,
+			&record.RelativePath,
+			&record.CaptureNumber,
+			&record.EADProjectName,
+			&record.Area,
+			&record.RecordGUID,
+			&record.SessionID,
+			&record.LineNumber,
+			&record.SegmentNumber,
+			&record.WaypointNumber,
+			&record.ExposureNumber,
+			&capturedAtRaw,
+			&record.Latitude,
+			&record.Longitude,
+			&record.Altitude,
+			&agl,
+			&record.TrackOverGround,
+			&record.GroundSpeed,
+			&record.Software,
+			&record.Aperture,
+			&record.ExposureTimeSeconds,
+		); err != nil {
+			return nil, err
+		}
+		if capturedAtRaw != "" {
+			record.CapturedAt, err = time.Parse(time.RFC3339Nano, capturedAtRaw)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if agl.Valid {
+			record.AboveGroundLevel = &agl.Float64
+		}
+		records = append(records, record)
+	}
+
+	return records, rows.Err()
+}
+
 func (s *Store) persistedCaptureStatusTx(tx *sql.Tx, project string) (models.PersistedCaptureStatus, error) {
 	stats, err := s.projectStatsTx(tx, project)
 	if err != nil {
@@ -738,7 +1151,19 @@ func isSQLiteBusyError(err error) bool {
 }
 
 func normalizeRelativePath(path string) string {
-	return filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Clean(path))
+}
+
+func normalizeEADProcessingState(state string) string {
+	state = strings.ToLower(strings.TrimSpace(state))
+	if state == "" {
+		return "success"
+	}
+	return state
 }
 
 func SortProjects(projects []models.ProjectInfo) {

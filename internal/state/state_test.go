@@ -1,6 +1,7 @@
 package state
 
 import (
+	"database/sql"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -383,5 +384,285 @@ func TestStorePromotesCaptureToTestWhenRawArrivesAfterMetadata(t *testing.T) {
 	}
 	if loaded.CompletedTestCaptures != 1 {
 		t.Fatalf("LoadProjectStatus CompletedTestCaptures = %d, want 1", loaded.CompletedTestCaptures)
+	}
+}
+
+func TestStoreSaveEADProcessingIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	modTime := time.Unix(1710001111, 0).UTC()
+	agl := 3310.8
+
+	record := EADRecord{
+		ProjectName:         "ProjA",
+		RelativePath:        "ead/EAD-00027-ProjA-ABC.xml",
+		CaptureNumber:       "00027",
+		EADProjectName:      "Vologda_2k",
+		Area:                "Cherepovec",
+		RecordGUID:          "FF4070C7-B7E0-40E5-B7F3-F8C00FD4AFE4",
+		SessionID:           "FF4070C7_B7E0_40E5_B7F3_F8C00FD4AFE4",
+		LineNumber:          19,
+		SegmentNumber:       1,
+		WaypointNumber:      8,
+		ExposureNumber:      27,
+		CapturedAt:          time.Date(2025, 9, 3, 4, 54, 31, 0, time.UTC),
+		Latitude:            59.27014,
+		Longitude:           37.25717,
+		Altitude:            3438.5,
+		AboveGroundLevel:    &agl,
+		TrackOverGround:     200,
+		GroundSpeed:         111.1,
+		Software:            "COSa V4.5.5",
+		Aperture:            "F 8",
+		ExposureTimeSeconds: 0.002,
+	}
+	status := EADProcessingStatus{
+		ProjectName:  record.ProjectName,
+		RelativePath: record.RelativePath,
+		FileSize:     1234,
+		ModTime:      modTime,
+		Status:       "success",
+	}
+
+	if err := store.SaveEADProcessing(record, status); err != nil {
+		t.Fatalf("SaveEADProcessing returned error: %v", err)
+	}
+
+	record.GroundSpeed = 112.2
+	status.WarningMessage = "minor normalization note"
+	if err := store.SaveEADProcessing(record, status); err != nil {
+		t.Fatalf("second SaveEADProcessing returned error: %v", err)
+	}
+
+	loadedRecord, found, err := store.LoadEADRecord("ProjA", "ead/EAD-00027-ProjA-ABC.xml")
+	if err != nil {
+		t.Fatalf("LoadEADRecord returned error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected EAD record to exist")
+	}
+	if loadedRecord.GroundSpeed != 112.2 {
+		t.Fatalf("GroundSpeed = %v, want 112.2", loadedRecord.GroundSpeed)
+	}
+	if loadedRecord.Area != "Cherepovec" {
+		t.Fatalf("Area = %q, want Cherepovec", loadedRecord.Area)
+	}
+
+	loadedStatus, found, err := store.LoadEADProcessingStatus("ProjA", "ead/EAD-00027-ProjA-ABC.xml")
+	if err != nil {
+		t.Fatalf("LoadEADProcessingStatus returned error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected EAD processing status to exist")
+	}
+	if loadedStatus.WarningMessage != "minor normalization note" {
+		t.Fatalf("WarningMessage = %q, want updated warning", loadedStatus.WarningMessage)
+	}
+
+	var recordCount, statusCount int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM ead_records WHERE project_name = ? AND relative_path = ?`, "ProjA", "ead/EAD-00027-ProjA-ABC.xml").Scan(&recordCount); err != nil {
+		t.Fatalf("count ead_records failed: %v", err)
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM ead_processing_status WHERE project_name = ? AND relative_path = ?`, "ProjA", "ead/EAD-00027-ProjA-ABC.xml").Scan(&statusCount); err != nil {
+		t.Fatalf("count ead_processing_status failed: %v", err)
+	}
+	if recordCount != 1 || statusCount != 1 {
+		t.Fatalf("expected single upserted rows, got records=%d status=%d", recordCount, statusCount)
+	}
+}
+
+func TestStoreRecordsEADProcessingFailure(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	modTime := time.Unix(1710002222, 0).UTC()
+
+	if err := store.RecordEADProcessingFailure(EADProcessingStatus{
+		ProjectName:    "ProjA",
+		RelativePath:   "ead/bad.xml",
+		FileSize:       77,
+		ModTime:        modTime,
+		Status:         "error",
+		ErrorMessage:   "ead parse error at line 3, column 17: unexpected EOF",
+		WarningMessage: "truncated file",
+	}); err != nil {
+		t.Fatalf("RecordEADProcessingFailure returned error: %v", err)
+	}
+
+	loadedStatus, found, err := store.LoadEADProcessingStatus("ProjA", "ead/bad.xml")
+	if err != nil {
+		t.Fatalf("LoadEADProcessingStatus returned error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected failure status to exist")
+	}
+	if loadedStatus.Status != "error" {
+		t.Fatalf("Status = %q, want error", loadedStatus.Status)
+	}
+	if loadedStatus.ErrorMessage == "" {
+		t.Fatal("expected error message to be stored")
+	}
+
+	_, found, err = store.LoadEADRecord("ProjA", "ead/bad.xml")
+	if err != nil {
+		t.Fatalf("LoadEADRecord returned error: %v", err)
+	}
+	if found {
+		t.Fatal("did not expect successful EAD record for failed processing")
+	}
+}
+
+func TestStoreSaveEADProcessingRollsBackOnStatusInsertFailure(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+
+	err := store.SaveEADProcessing(
+		EADRecord{
+			ProjectName:         "ProjA",
+			RelativePath:        "ead/good.xml",
+			CaptureNumber:       "00001",
+			EADProjectName:      "ProjA",
+			RecordGUID:          "ABC",
+			SessionID:           "ABC",
+			LineNumber:          1,
+			SegmentNumber:       1,
+			WaypointNumber:      1,
+			ExposureNumber:      1,
+			CapturedAt:          time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
+			Latitude:            1,
+			Longitude:           2,
+			Altitude:            3,
+			TrackOverGround:     4,
+			GroundSpeed:         5,
+			Software:            "COSa",
+			Aperture:            "F 8",
+			ExposureTimeSeconds: 0.001,
+		},
+		EADProcessingStatus{
+			ProjectName:  "ProjA",
+			RelativePath: "",
+			FileSize:     123,
+			ModTime:      time.Unix(1710003333, 0).UTC(),
+			Status:       "success",
+		},
+	)
+	if err == nil {
+		t.Fatal("expected SaveEADProcessing to fail when status relative path is empty")
+	}
+
+	_, found, err := store.LoadEADRecord("ProjA", "ead/good.xml")
+	if err != nil && err != sql.ErrNoRows {
+		t.Fatalf("LoadEADRecord returned unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected EAD record insert to be rolled back")
+	}
+}
+
+func TestStoreListCompletedEADRecordsReturnsCompletedCapturesOnly(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t)
+	if _, err := store.StartRun("ProjA", "/ucdata", 4); err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	completedRecord := EADRecord{
+		ProjectName:         "ProjA",
+		RelativePath:        "EAD-00027-ProjA-ABC.xml",
+		CaptureNumber:       "00027",
+		EADProjectName:      "ProjA",
+		Area:                "Area-27",
+		RecordGUID:          "GUID-27",
+		SessionID:           "GUID_27",
+		LineNumber:          10,
+		SegmentNumber:       1,
+		WaypointNumber:      5,
+		ExposureNumber:      27,
+		CapturedAt:          time.Date(2025, 9, 3, 4, 54, 31, 0, time.UTC),
+		Latitude:            59.1,
+		Longitude:           37.2,
+		Altitude:            1000,
+		TrackOverGround:     180,
+		GroundSpeed:         120,
+		Software:            "COSa",
+		Aperture:            "F 8",
+		ExposureTimeSeconds: 0.002,
+	}
+	pendingRecord := EADRecord{
+		ProjectName:         "ProjA",
+		RelativePath:        "EAD-00028-ProjA-ABC.xml",
+		CaptureNumber:       "00028",
+		EADProjectName:      "ProjA",
+		Area:                "Area-28",
+		RecordGUID:          "GUID-28",
+		SessionID:           "GUID_28",
+		LineNumber:          11,
+		SegmentNumber:       1,
+		WaypointNumber:      6,
+		ExposureNumber:      28,
+		CapturedAt:          time.Date(2025, 9, 3, 4, 55, 31, 0, time.UTC),
+		Latitude:            59.2,
+		Longitude:           37.3,
+		Altitude:            1001,
+		TrackOverGround:     181,
+		GroundSpeed:         121,
+		Software:            "COSa",
+		Aperture:            "F 8",
+		ExposureTimeSeconds: 0.002,
+	}
+	for _, record := range []EADRecord{completedRecord, pendingRecord} {
+		if err := store.SaveEADProcessing(record, EADProcessingStatus{
+			ProjectName:  record.ProjectName,
+			RelativePath: record.RelativePath,
+			FileSize:     100,
+			ModTime:      record.CapturedAt,
+			Status:       "success",
+		}); err != nil {
+			t.Fatalf("SaveEADProcessing(%s) returned error: %v", record.CaptureNumber, err)
+		}
+	}
+
+	for _, obs := range []CaptureObservation{
+		{
+			Project: "ProjA",
+			Info:    models.CaptureInfo{DataType: "Lvl00", CaptureNumber: "00027", ProjectName: "ProjA", SensorCode: "00-00", SessionID: "GUID_27", IsVerified: true},
+			FileKey: "raw:00-00", RequiredRawFiles: 1, RequireXML: true, RequireDAT: true,
+		},
+		{
+			Project: "ProjA",
+			Info:    models.CaptureInfo{DataType: "EAD", CaptureNumber: "00027", ProjectName: "ProjA", SessionID: "GUID_27", IsVerified: true},
+			FileKey: "xml:CU", RequiredRawFiles: 1, RequireXML: true, RequireDAT: true,
+		},
+		{
+			Project: "ProjA",
+			Info:    models.CaptureInfo{DataType: "RawQv", CaptureNumber: "00027", ProjectName: "ProjA", SessionID: "GUID_27", IsVerified: true},
+			FileKey: "dat:CU", RequiredRawFiles: 1, RequireXML: true, RequireDAT: true,
+		},
+		{
+			Project: "ProjA",
+			Info:    models.CaptureInfo{DataType: "Lvl00", CaptureNumber: "00028", ProjectName: "ProjA", SensorCode: "00-00", SessionID: "GUID_28", IsVerified: true},
+			FileKey: "raw:00-00", RequiredRawFiles: 1, RequireXML: true, RequireDAT: true,
+		},
+	} {
+		if _, _, err := store.RecordCapture(obs); err != nil {
+			t.Fatalf("RecordCapture(%s/%s) returned error: %v", obs.Info.CaptureNumber, obs.FileKey, err)
+		}
+	}
+
+	records, err := store.ListCompletedEADRecords("ProjA")
+	if err != nil {
+		t.Fatalf("ListCompletedEADRecords returned error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 completed EAD record, got %d", len(records))
+	}
+	if records[0].CaptureNumber != "00027" {
+		t.Fatalf("CaptureNumber = %q, want 00027", records[0].CaptureNumber)
+	}
+	if records[0].Area != "Area-27" {
+		t.Fatalf("Area = %q, want Area-27", records[0].Area)
 	}
 }

@@ -53,13 +53,14 @@ import (
 
 // Service handles file synchronization operations
 type Service struct {
-	nodes             []string
-	shares            []string
-	baseMountDir      string // Base directory for mounted shares (e.g., /ucmount)
-	requiredSensors   map[string]struct{}
-	stateStore        *state.Store
-	forceFullResync   bool
-	mountPointMounted func(string) (bool, error)
+	nodes               []string
+	shares              []string
+	baseMountDir        string // Base directory for mounted shares (e.g., /ucmount)
+	requiredSensors     map[string]struct{}
+	stateStore          *state.Store
+	copiedFileProcessor CopiedFileProcessor
+	forceFullResync     bool
+	mountPointMounted   func(string) (bool, error)
 
 	mu                    sync.RWMutex
 	isRunning             bool
@@ -93,6 +94,21 @@ type taskInfo struct {
 	copiedBytes  int64
 	lastActivity time.Time
 	cancel       context.CancelFunc
+}
+
+type CopiedFileEvent struct {
+	Project         string
+	RelativePath    string
+	SourcePath      string
+	DestinationPath string
+	DestinationRoot string
+	Node            string
+	FileSize        int64
+	ModTime         time.Time
+}
+
+type CopiedFileProcessor interface {
+	ProcessCopiedFile(context.Context, CopiedFileEvent) error
 }
 
 var (
@@ -237,6 +253,13 @@ func (s *Service) SetStateStore(store *state.Store) error {
 	}
 
 	return nil
+}
+
+func (s *Service) SetCopiedFileProcessor(processor CopiedFileProcessor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.copiedFileProcessor = processor
 }
 
 // Start begins synchronization
@@ -888,25 +911,59 @@ func (s *Service) copyFile(ctx context.Context, task *taskInfo, sourcePath, sour
 		return statErr
 	}
 
-	if err := s.persistCopiedFileState(sourcePath, relPath, info, task.node); err != nil {
+	completedCapture, err := s.persistCopiedFileState(sourcePath, relPath, info, task.node)
+	if err != nil {
 		return err
+	}
+
+	if isEADMetadataFile(relPath) || completedCapture {
+		s.processCopiedFile(ctx, CopiedFileEvent{
+			Project:         s.project,
+			RelativePath:    filepath.ToSlash(relPath),
+			SourcePath:      sourcePath,
+			DestinationPath: destPath,
+			DestinationRoot: destRoot,
+			Node:            task.node,
+			FileSize:        info.Size(),
+			ModTime:         info.ModTime(),
+		})
 	}
 
 	return nil
 }
 
-func (s *Service) persistCopiedFileState(sourcePath, relPath string, info os.FileInfo, node string) error {
+func (s *Service) processCopiedFile(ctx context.Context, event CopiedFileEvent) {
+	s.mu.RLock()
+	processor := s.copiedFileProcessor
+	s.mu.RUnlock()
+
+	if processor == nil {
+		return
+	}
+
+	if err := processor.ProcessCopiedFile(ctx, event); err != nil {
+		log.Warn().
+			Err(err).
+			Str("project", event.Project).
+			Str("relative_path", event.RelativePath).
+			Str("destination_path", event.DestinationPath).
+			Msg("Post-copy EAD processing failed")
+	}
+}
+
+func (s *Service) persistCopiedFileState(sourcePath, relPath string, info os.FileInfo, node string) (bool, error) {
 	s.mu.RLock()
 	project := s.project
 	store := s.stateStore
 	s.mu.RUnlock()
 
 	if store == nil {
-		return s.trackCaptureCompletion(filepath.Base(sourcePath), node)
+		return s.trackCaptureCompletionStatus(filepath.Base(sourcePath), node)
 	}
 
 	var errs []error
-	if err := s.trackCaptureCompletion(filepath.Base(sourcePath), node); err != nil {
+	completedCapture, err := s.trackCaptureCompletionStatus(filepath.Base(sourcePath), node)
+	if err != nil {
 		errs = append(errs, err)
 	}
 	if err := store.MarkFileCopied(project, relPath, info.Size(), info.ModTime()); err != nil {
@@ -914,10 +971,10 @@ func (s *Service) persistCopiedFileState(sourcePath, relPath string, info os.Fil
 	}
 
 	if len(errs) > 0 {
-		return errors.Join(errs...)
+		return false, errors.Join(errs...)
 	}
 
-	return nil
+	return completedCapture, nil
 }
 
 func (s *Service) reconcilePersistedFileState(sourcePath, relPath string, info os.FileInfo) error {
@@ -946,8 +1003,13 @@ func (s *Service) reconcilePersistedFileState(sourcePath, relPath string, info o
 }
 
 func (s *Service) trackCaptureCompletion(filename, node string) error {
+	_, err := s.trackCaptureCompletionStatus(filename, node)
+	return err
+}
+
+func (s *Service) trackCaptureCompletionStatus(filename, node string) (bool, error) {
 	if len(s.requiredSensors) == 0 {
-		return nil
+		return false, nil
 	}
 
 	// Try to parse as RAW file first
@@ -958,13 +1020,13 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 		if info == nil {
 			info = parseRawQvFileName(filename)
 			if info == nil {
-				return nil
+				return false, nil
 			}
 		}
 	}
 
 	if info.CaptureNumber == "" {
-		return nil
+		return false, nil
 	}
 
 	s.mu.RLock()
@@ -980,7 +1042,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 		case ".raw":
 			sensorCode := strings.TrimSpace(info.SensorCode)
 			if _, ok := s.requiredSensors[sensorCode]; !ok {
-				return nil
+				return false, nil
 			}
 			fileKey = fmt.Sprintf("raw:%s", sensorCode)
 		case ".xml":
@@ -988,7 +1050,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 		case ".dat":
 			fileKey = "dat:CU"
 		default:
-			return nil
+			return false, nil
 		}
 
 		status, completed, err := store.RecordCapture(state.CaptureObservation{
@@ -1000,7 +1062,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 			RequireDAT:       true,
 		})
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		atomic.StoreInt32(&s.completedCaptures, int32(status.CompletedCaptures))
@@ -1035,7 +1097,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 			}
 		}
 
-		return nil
+		return completed, nil
 	}
 
 	s.mu.Lock()
@@ -1054,7 +1116,7 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 	if fileExt == ".raw" {
 		sensorCode := strings.TrimSpace(info.SensorCode)
 		if _, ok := s.requiredSensors[sensorCode]; !ok {
-			return nil
+			return false, nil
 		}
 		fileKey = fmt.Sprintf("raw:%s", sensorCode)
 	} else if fileExt == ".xml" {
@@ -1063,12 +1125,12 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 		// RawQv quality data file - optional supplemental file per capture
 		fileKey = "dat:CU"
 	} else {
-		return nil // Unknown file type
+		return false, nil // Unknown file type
 	}
 
 	// Skip if already tracked
 	if fileMap[fileKey] {
-		return nil
+		return false, nil
 	}
 
 	fileMap[fileKey] = true
@@ -1138,9 +1200,10 @@ func (s *Service) trackCaptureCompletion(filename, node string) error {
 		}
 
 		delete(s.captureTracker, info.CaptureNumber)
+		return true, nil
 	}
 
-	return nil
+	return false, nil
 }
 
 func (s *Service) checkDiskSpace(path string) bool {
@@ -1244,6 +1307,11 @@ func parseMetadataFileName(filename string) *models.CaptureInfo {
 		SessionID:     sessionID,
 		IsVerified:    true,
 	}
+}
+
+func isEADMetadataFile(path string) bool {
+	filename := filepath.Base(path)
+	return strings.EqualFold(filepath.Ext(filename), ".xml") && parseMetadataFileName(filename) != nil
 }
 
 func parseRawQvFileName(filename string) *models.CaptureInfo {
