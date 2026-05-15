@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -481,6 +483,115 @@ func TestHandleDownloadProjectReportRejectsUnsafeProject(t *testing.T) {
 
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.Code)
+	}
+}
+
+func TestHandleHostTimeReturnsCurrentHostTime(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 15, 10, 49, 13, 123000000, time.UTC)
+	server := &Server{nowFunc: func() time.Time { return now }}
+	req := httptest.NewRequest(http.MethodGet, "/api/host/time", nil)
+	resp := httptest.NewRecorder()
+
+	server.handleHostTime(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.Code)
+	}
+
+	var payload struct {
+		UnixMS int64  `json:"unix_ms"`
+		ISO    string `json:"iso"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.UnixMS != now.UnixMilli() {
+		t.Fatalf("UnixMS = %d, want %d", payload.UnixMS, now.UnixMilli())
+	}
+	if payload.ISO != "2026-05-15T10:49:13Z" {
+		t.Fatalf("ISO = %q, want RFC3339 UTC time", payload.ISO)
+	}
+}
+
+func TestHandleSyncHostTimeSetsClockAndRemountsShares(t *testing.T) {
+	t.Parallel()
+
+	before := time.Date(2026, 4, 17, 18, 53, 13, 0, time.UTC)
+	target := time.Date(2026, 5, 15, 10, 49, 13, 0, time.UTC)
+	var setTarget time.Time
+	var hwclockCalls atomic.Int32
+	var mountCalls atomic.Int32
+	now := before
+	server := &Server{
+		nowFunc: func() time.Time { return now },
+		setHostTimeFunc: func(t time.Time) error {
+			setTarget = t
+			now = t
+			return nil
+		},
+		syncHardwareClockFunc: func() error {
+			hwclockCalls.Add(1)
+			return nil
+		},
+		mountSharesFunc: func() error {
+			mountCalls.Add(1)
+			return nil
+		},
+	}
+	body := []byte(`{"client_unix_ms":` + strconv.FormatInt(target.UnixMilli(), 10) + `}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/host/time/sync", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+
+	server.handleSyncHostTime(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", resp.Code, resp.Body.String())
+	}
+	if !setTarget.Equal(target) {
+		t.Fatalf("setTarget = %s, want %s", setTarget, target)
+	}
+	if hwclockCalls.Load() != 1 {
+		t.Fatalf("hwclockCalls = %d, want 1", hwclockCalls.Load())
+	}
+	if mountCalls.Load() != 1 {
+		t.Fatalf("mountCalls = %d, want 1", mountCalls.Load())
+	}
+
+	var payload struct {
+		Status        string `json:"status"`
+		SharesMounted bool   `json:"shares_mounted"`
+		HWClockSynced bool   `json:"hwclock_synced"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Status != "time_synced" || !payload.SharesMounted || !payload.HWClockSynced {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestHandleSyncHostTimeRejectsOutOfRangeClientTime(t *testing.T) {
+	t.Parallel()
+
+	var setCalls atomic.Int32
+	server := &Server{
+		setHostTimeFunc: func(time.Time) error {
+			setCalls.Add(1)
+			return nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/host/time/sync", strings.NewReader(`{"client_unix_ms":0}`))
+	resp := httptest.NewRecorder()
+
+	server.handleSyncHostTime(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.Code)
+	}
+	if setCalls.Load() != 0 {
+		t.Fatalf("setCalls = %d, want 0", setCalls.Load())
 	}
 }
 

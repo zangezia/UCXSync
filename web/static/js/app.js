@@ -29,7 +29,8 @@ class UCXSyncApp {
             await Promise.all([
                 this.loadDashboardProjects(),
                 this.loadDashboardDestinations(),
-                this.refreshDashboardOverview()
+                this.refreshDashboardOverview(),
+                this.loadHostTime()
             ]);
             await this.refreshDashboardPreflight({ silent: true });
             this.dashboardTimer = setInterval(() => {
@@ -40,7 +41,8 @@ class UCXSyncApp {
             this.connectWebSocket();
             await Promise.all([
                 this.loadProjects(),
-                this.loadDestinations()
+                this.loadDestinations(),
+                this.loadHostTime()
             ]);
             await this.refreshPreflight({ silent: true });
         }
@@ -65,6 +67,8 @@ class UCXSyncApp {
         this.manageDevicesBtn = document.getElementById('manage-devices-btn');
         this.manageDbBtn = document.getElementById('manage-db-btn');
         this.mountSharesBtn = document.getElementById('mount-shares-btn');
+        this.syncTimeBtn = document.getElementById('sync-time-btn');
+        this.hostTimeStatus = document.getElementById('host-time-status');
         this.downloadReportBtn = document.getElementById('download-report-btn');
         this.restartServiceBtn = document.getElementById('restart-service-btn');
         this.shutdownHostBtn = document.getElementById('shutdown-host-btn');
@@ -141,13 +145,15 @@ class UCXSyncApp {
                 await Promise.all([
                     this.loadDashboardProjects(),
                     this.loadDashboardDestinations(),
-                    this.refreshDashboardOverview()
+                    this.refreshDashboardOverview(),
+                    this.loadHostTime()
                 ]);
                 await this.refreshDashboardPreflight({ silent: true }).catch(() => {});
             } else {
                 await Promise.all([
                     this.loadProjects(),
-                    this.loadDestinations()
+                    this.loadDestinations(),
+                    this.loadHostTime()
                 ]);
                 await this.refreshPreflight({ silent: true }).catch(() => {});
             }
@@ -164,6 +170,7 @@ class UCXSyncApp {
                 this.mountShares();
             }
         });
+        this.syncTimeBtn?.addEventListener('click', () => this.syncHostTime());
 
         this.restartServiceBtn.addEventListener('click', () => {
             if (this.mode === 'dashboard') {
@@ -471,6 +478,77 @@ class UCXSyncApp {
 
     getCurrentDestination() {
         return this.destinationCustom.value.trim() || this.destinationSelect.value;
+    }
+
+    async loadHostTime() {
+        if (!this.hostTimeStatus) {
+            return;
+        }
+
+        try {
+            const hostTime = await this.fetchJSON('/api/host/time');
+            this.renderHostTime(hostTime);
+        } catch (error) {
+            this.hostTimeStatus.className = 'host-time-status error';
+            this.hostTimeStatus.textContent = 'Время хоста: недоступно';
+        }
+    }
+
+    renderHostTime(hostTime) {
+        if (!this.hostTimeStatus) {
+            return;
+        }
+
+        const hostDate = new Date(hostTime.unix_ms);
+        const clientDate = new Date();
+        const driftMs = hostDate.getTime() - clientDate.getTime();
+        const driftMinutes = Math.round(Math.abs(driftMs) / 60000);
+        const hostLabel = hostDate.toLocaleString();
+
+        this.hostTimeStatus.className = driftMinutes >= 5
+            ? 'host-time-status warning'
+            : 'host-time-status';
+        this.hostTimeStatus.textContent = driftMinutes >= 1
+            ? `Время хоста: ${hostLabel} (расхождение ~${driftMinutes} мин)`
+            : `Время хоста: ${hostLabel}`;
+    }
+
+    async syncHostTime() {
+        const clientDate = new Date();
+        const message = `Синхронизировать время syncmaster с этим устройством?\n\nБудет установлено: ${clientDate.toLocaleString()}`;
+        if (!window.confirm(message)) {
+            return;
+        }
+
+        this.syncTimeBtn.disabled = true;
+        try {
+            const result = await this.fetchJSON('/api/host/time/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_unix_ms: clientDate.getTime() })
+            });
+
+            const driftSeconds = Math.round(Math.abs(result.drift_ms || 0) / 1000);
+            const shareText = result.shares_mounted
+                ? 'шары перемонтированы'
+                : `шары не перемонтированы: ${result.mount_error || 'ошибка'}`;
+            const clockText = result.hwclock_synced
+                ? 'RTC обновлены'
+                : `RTC не обновлены: ${result.hwclock_error || 'ошибка'}`;
+            this.log(`✓ Время хоста синхронизировано, исправлено ~${driftSeconds} сек; ${shareText}; ${clockText}`, result.shares_mounted ? 'success' : 'warn');
+            await this.loadHostTime();
+            if (this.mode === 'dashboard') {
+                await this.refreshDashboardPreflight({ silent: true }).catch(() => {});
+                await this.refreshDashboardOverview().catch(() => {});
+            } else {
+                await this.refreshPreflight({ silent: true }).catch(() => {});
+            }
+        } catch (error) {
+            this.log(`✗ Ошибка синхронизации времени: ${error.message}`, 'error');
+            await this.loadHostTime().catch(() => {});
+        } finally {
+            this.syncTimeBtn.disabled = false;
+        }
     }
 
     async loadProjects() {

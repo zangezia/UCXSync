@@ -52,6 +52,9 @@ type Server struct {
 	mountSharesFunc          func() error
 	checkSharesAvailability  func() []syncService.UnavailableShare
 	checkNetworkRequirements func() error
+	nowFunc                  func() time.Time
+	setHostTimeFunc          func(time.Time) error
+	syncHardwareClockFunc    func() error
 	findProjectsFunc         func(context.Context) ([]models.ProjectInfo, error)
 	getDestinationsFunc      func() []models.DestinationInfo
 	getStatusFunc            func() models.SyncStatus
@@ -148,6 +151,9 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	server.mountSharesFunc = netService.MountAll
 	server.checkSharesAvailability = svc.CheckSharesAvailability
 	server.checkNetworkRequirements = network.CheckRequirements
+	server.nowFunc = time.Now
+	server.setHostTimeFunc = setSystemClock
+	server.syncHardwareClockFunc = syncHardwareClock
 	server.findProjectsFunc = svc.FindProjects
 	server.getDestinationsFunc = server.getAvailableDestinations
 	server.getStatusFunc = svc.GetStatus
@@ -179,6 +185,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/shares/mount", s.handleMountShares)
 	mux.HandleFunc("/api/shares/check", s.handleCheckShares)
 	mux.HandleFunc("/api/service/restart", s.handleRestartService)
+	mux.HandleFunc("/api/host/time", s.handleHostTime)
+	mux.HandleFunc("/api/host/time/sync", s.handleSyncHostTime)
 	mux.HandleFunc("/api/host/shutdown", s.handleHostShutdown)
 	mux.HandleFunc("/api/status", s.handleGetStatus)
 	mux.HandleFunc("/api/project-stats", s.handleGetProjectStats)
@@ -1062,6 +1070,92 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
 }
 
+func (s *Server) handleHostTime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	now := s.hostNow()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"unix_ms":    now.UnixMilli(),
+		"iso":        now.UTC().Format(time.RFC3339),
+		"local":      now.Format(time.RFC3339),
+		"time_zone":  now.Format("MST"),
+		"utc_offset": now.Format("-07:00"),
+	})
+}
+
+func (s *Server) handleSyncHostTime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ClientUnixMS int64 `json:"client_unix_ms"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	target := time.UnixMilli(req.ClientUnixMS).UTC()
+	if err := validateHostTimeTarget(target); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	before := s.hostNow()
+	if err := s.setHostTime(target); err != nil {
+		log.Error().Err(err).Time("target", target).Msg("Failed to set host time")
+		http.Error(w, fmt.Sprintf("failed to set host time: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	hwclockSynced := true
+	var hwclockError string
+	if err := s.syncHardwareClock(); err != nil {
+		hwclockSynced = false
+		hwclockError = err.Error()
+		log.Warn().Err(err).Msg("Failed to sync hardware clock after host time correction")
+	}
+
+	sharesMounted := true
+	var mountError string
+	if err := s.mountAllShares(); err != nil {
+		sharesMounted = false
+		mountError = err.Error()
+		log.Warn().Err(err).Msg("Failed to remount shares after host time correction")
+	}
+
+	after := s.hostNow()
+	drift := target.Sub(before)
+	s.broadcast(models.WSMessage{
+		Type: "log",
+		Payload: models.LogMessage{
+			Timestamp: after,
+			Level:     "warn",
+			Message:   fmt.Sprintf("Host time synchronized from browser device, drift corrected: %s", drift.Round(time.Second)),
+		},
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":         "time_synced",
+		"before_unix_ms": before.UnixMilli(),
+		"after_unix_ms":  after.UnixMilli(),
+		"target_unix_ms": target.UnixMilli(),
+		"drift_ms":       drift.Milliseconds(),
+		"hwclock_synced": hwclockSynced,
+		"hwclock_error":  hwclockError,
+		"shares_mounted": sharesMounted,
+		"mount_error":    mountError,
+	})
+}
+
 func (s *Server) handleHostShutdown(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1107,6 +1201,57 @@ func (s *Server) currentSyncStatus() models.SyncStatus {
 		return models.SyncStatus{}
 	}
 	return s.syncService.GetStatus()
+}
+
+func (s *Server) hostNow() time.Time {
+	if s.nowFunc != nil {
+		return s.nowFunc()
+	}
+	return time.Now()
+}
+
+func (s *Server) setHostTime(target time.Time) error {
+	if s.setHostTimeFunc != nil {
+		return s.setHostTimeFunc(target)
+	}
+	return setSystemClock(target)
+}
+
+func (s *Server) syncHardwareClock() error {
+	if s.syncHardwareClockFunc != nil {
+		return s.syncHardwareClockFunc()
+	}
+	return syncHardwareClock()
+}
+
+func validateHostTimeTarget(target time.Time) error {
+	if target.IsZero() {
+		return fmt.Errorf("client_unix_ms is required")
+	}
+
+	year := target.UTC().Year()
+	if year < 2024 || year > 2035 {
+		return fmt.Errorf("client time is outside the allowed range")
+	}
+
+	return nil
+}
+
+func setSystemClock(target time.Time) error {
+	formatted := target.UTC().Format("2006-01-02 15:04:05")
+	cmd := exec.Command("date", "-u", "-s", formatted)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
+func syncHardwareClock() error {
+	cmd := exec.Command("hwclock", "--systohc")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
 }
 
 func (s *Server) findProjects(ctx context.Context) ([]models.ProjectInfo, error) {
