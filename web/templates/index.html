@@ -79,20 +79,69 @@
                             </label>
                         </div>
 
-                    <div class="preflight-panel" id="preflight-panel">
-                        <div class="preflight-header">
-                            <div>
-                                <div class="preflight-title">Панель готовности перед запуском</div>
-                                <div class="preflight-summary" id="preflight-summary">Проверяем проект, диск назначения и доступность сетевых шар.</div>
+                        <!-- Performance Metrics -->
+                        <div class="metrics-panel">
+                            <h2 id="metrics-title">Производительность</h2>
+                            <div class="metrics-grid">
+                                <div class="metric-card">
+                                    <div class="metric-label">CPU</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" id="cpu-progress"></div>
+                                    </div>
+                                    <div class="metric-value" id="cpu-value">0%</div>
+                                </div>
+
+                                <div class="metric-card">
+                                    <div class="metric-label">Память</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" id="memory-progress"></div>
+                                    </div>
+                                    <div class="metric-value" id="memory-value">0 GB / 0 GB</div>
+                                </div>
+
+                                <div class="metric-card">
+                                    <div class="metric-label">Диск</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" id="disk-progress"></div>
+                                    </div>
+                                    <div class="metric-value" id="disk-value">0 MB/s</div>
+                                </div>
+
+                                <div class="metric-card">
+                                    <div class="metric-label">Сеть (суммарно)</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" id="network-progress"></div>
+                                    </div>
+                                    <div class="metric-value" id="network-value">0 MB/s</div>
+                                </div>
+
+                                <div class="metric-card">
+                                    <div class="metric-label" id="network-primary-label">Сеть #1</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" id="network-primary-progress"></div>
+                                    </div>
+                                    <div class="metric-value" id="network-primary-value">Нет данных</div>
+                                </div>
+
+                                <div class="metric-card">
+                                    <div class="metric-label" id="network-secondary-label">Сеть #2</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" id="network-secondary-progress"></div>
+                                    </div>
+                                    <div class="metric-value" id="network-secondary-value">Нет данных</div>
+                                </div>
+
+                                <div class="metric-card">
+                                    <div class="metric-label">Температура CPU</div>
+                                    <div class="metric-value large" id="cpu-temperature-value">—</div>
+                                </div>
+
+                                <div class="metric-card">
+                                    <div class="metric-label">Свободно на диске</div>
+                                    <div class="metric-value large" id="free-disk">0 GB</div>
+                                </div>
                             </div>
-                            <span class="preflight-badge" id="preflight-badge">Проверка…</span>
                         </div>
-                        <div class="preflight-body">
-                            <ul class="preflight-checks" id="preflight-checks">
-                                <li class="preflight-check preflight-loading">Ожидание проверки…</li>
-                            </ul>
-                        </div>
-                    </div>
                     </div>
 
                     <!-- Right: action buttons -->
@@ -115,67 +164,18 @@
                 <div class="instances-grid" id="instances-grid"></div>
             </section>
 
-            <!-- Performance Metrics -->
-            <section class="metrics-panel">
-                <h2 id="metrics-title">Производительность</h2>
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-label">CPU</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="cpu-progress"></div>
-                        </div>
-                        <div class="metric-value" id="cpu-value">0%</div>
+            <section class="preflight-panel" id="preflight-panel">
+                <div class="preflight-header">
+                    <div>
+                        <div class="preflight-title">Панель готовности перед запуском</div>
+                        <div class="preflight-summary" id="preflight-summary">Проверяем проект, диск назначения и доступность сетевых шар.</div>
                     </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">Память</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="memory-progress"></div>
-                        </div>
-                        <div class="metric-value" id="memory-value">0 GB / 0 GB</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">Диск</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="disk-progress"></div>
-                        </div>
-                        <div class="metric-value" id="disk-value">0 MB/s</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">Сеть (суммарно)</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="network-progress"></div>
-                        </div>
-                        <div class="metric-value" id="network-value">0 MB/s</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label" id="network-primary-label">Сеть #1</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="network-primary-progress"></div>
-                        </div>
-                        <div class="metric-value" id="network-primary-value">Нет данных</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label" id="network-secondary-label">Сеть #2</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="network-secondary-progress"></div>
-                        </div>
-                        <div class="metric-value" id="network-secondary-value">Нет данных</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">Температура CPU</div>
-                        <div class="metric-value large" id="cpu-temperature-value">—</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">Свободно на диске</div>
-                        <div class="metric-value large" id="free-disk">0 GB</div>
-                    </div>
+                    <span class="preflight-badge" id="preflight-badge">Проверка…</span>
+                </div>
+                <div class="preflight-body">
+                    <ul class="preflight-checks" id="preflight-checks">
+                        <li class="preflight-check preflight-loading">Ожидание проверки…</li>
+                    </ul>
                 </div>
             </section>
 
